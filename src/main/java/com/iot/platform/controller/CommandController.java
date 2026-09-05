@@ -1,6 +1,7 @@
 package com.iot.platform.controller;
 
 import com.iot.platform.common.Result;
+import com.iot.platform.dto.CommandAckRequest;
 import com.iot.platform.dto.CommandRequest;
 import com.iot.platform.dto.CommandVO;
 import com.iot.platform.service.CommandService;
@@ -29,6 +30,16 @@ public class CommandController {
     @GetMapping("/commands/{requestId}")
     public Result<CommandVO> status(@PathVariable String requestId) {
         CommandVO vo = commandService.getStatus(requestId);
+        return vo != null ? Result.ok(vo) : Result.fail(4004, "command not found");
+    }
+
+    @PostMapping("/commands/ack")
+    public Result<CommandVO> ack(@RequestBody CommandAckRequest request) {
+        if (request.getRequestId() == null) {
+            return Result.fail(4001, "request_id is required");
+        }
+        boolean success = request.getSuccess() == null || request.getSuccess();
+        CommandVO vo = commandService.ack(request.getRequestId(), success);
         return vo != null ? Result.ok(vo) : Result.fail(4004, "command not found");
     }
 }

@@ -1,15 +1,27 @@
 package com.iot.platform.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.iot.platform.entity.Device;
 import lombok.Data;
 
 @Data
 public class DeviceVO {
+
     private Long id;
+
+    @JsonProperty("device_key")
     private String deviceKey;
+
+    @JsonProperty("device_name")
     private String deviceName;
+
+    @JsonProperty("product_key")
     private String productKey;
+
+    @JsonProperty("online_status")
     private Integer onlineStatus;
+
+    @JsonProperty("last_online_at")
     private String lastOnlineAt;
 
     public static DeviceVO from(Device d) {

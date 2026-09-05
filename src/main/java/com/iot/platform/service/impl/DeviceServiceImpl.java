@@ -3,20 +3,33 @@ package com.iot.platform.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iot.platform.common.BizException;
+import com.iot.platform.common.ErrorCode;
+import com.iot.platform.dto.DeviceRegisterRequest;
+import com.iot.platform.dto.DeviceRegisterVO;
 import com.iot.platform.dto.DeviceVO;
 import com.iot.platform.dto.TelemetryPointVO;
 import com.iot.platform.entity.Device;
+import com.iot.platform.entity.DeviceLog;
 import com.iot.platform.entity.DeviceTelemetry;
+import com.iot.platform.entity.Product;
+import com.iot.platform.mapper.DeviceLogMapper;
 import com.iot.platform.mapper.DeviceMapper;
 import com.iot.platform.mapper.DeviceTelemetryMapper;
+import com.iot.platform.mapper.ProductMapper;
 import com.iot.platform.service.DeviceService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -27,12 +40,27 @@ public class DeviceServiceImpl implements DeviceService {
 
     private final DeviceMapper deviceMapper;
     private final DeviceTelemetryMapper telemetryMapper;
+    private final ProductMapper productMapper;
+    private final DeviceLogMapper deviceLogMapper;
+    private final ObjectMapper objectMapper;
+
+    private static final SecureRandom RANDOM = new SecureRandom();
+    private static final DateTimeFormatter KEY_TS = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+
+    /** 心跳超时阈值（秒）：超过该时间无上报视为离线 */
+    private static final long OFFLINE_TIMEOUT_SECONDS = 60;
 
     @Override
-    public Page<DeviceVO> listDevices(int page, int size) {
+    public Page<DeviceVO> listDevices(int page, int size, String keyword) {
         Page<Device> devicePage = new Page<>(page, size);
-        deviceMapper.selectPage(devicePage, new LambdaQueryWrapper<Device>()
-                .orderByDesc(Device::getCreatedAt));
+        LambdaQueryWrapper<Device> wrapper = new LambdaQueryWrapper<Device>()
+                .orderByDesc(Device::getOnlineStatus)
+                .orderByDesc(Device::getLastOnlineAt);
+        if (keyword != null && !keyword.isBlank()) {
+            wrapper.and(w -> w.like(Device::getDeviceKey, keyword)
+                    .or().like(Device::getDeviceName, keyword));
+        }
+        deviceMapper.selectPage(devicePage, wrapper);
 
         Page<DeviceVO> voPage = new Page<>(page, size, devicePage.getTotal());
         voPage.setRecords(devicePage.getRecords().stream().map(DeviceVO::from).collect(Collectors.toList()));
@@ -46,7 +74,12 @@ public class DeviceServiceImpl implements DeviceService {
         if (device == null) {
             return Collections.emptyMap();
         }
-        return new HashMap<>(telemetryMapper.selectLatestByDevice(device.getId()));
+        // 每个属性一行（property_key, value），转成 {key: value} 结构
+        Map<String, Object> result = new LinkedHashMap<>();
+        for (Map<String, String> row : telemetryMapper.selectLatestByDevice(device.getId())) {
+            result.put(row.get("property_key"), row.get("value"));
+        }
+        return result;
     }
 
     @Override
@@ -77,5 +110,139 @@ public class DeviceServiceImpl implements DeviceService {
             vo.setValue(t.getValue());
             return vo;
         }).collect(Collectors.toList());
+    }
+
+    @Override
+    public Map<String, Object> getTsl(String deviceKey) {
+        Device device = deviceMapper.selectOne(
+                new LambdaQueryWrapper<Device>().eq(Device::getDeviceKey, deviceKey));
+        if (device == null) {
+            return Collections.emptyMap();
+        }
+        Product product = productMapper.selectOne(
+                new LambdaQueryWrapper<Product>().eq(Product::getProductKey, device.getProductKey()));
+        if (product == null || product.getTsl() == null || product.getTsl().isBlank()) {
+            return Collections.emptyMap();
+        }
+        try {
+            return objectMapper.readValue(product.getTsl(), new TypeReference<Map<String, Object>>() {});
+        } catch (Exception e) {
+            log.warn("tsl parse error, product_key={}", product.getProductKey(), e);
+            return Collections.emptyMap();
+        }
+    }
+
+    @Override
+    public DeviceRegisterVO register(DeviceRegisterRequest request) {
+        Product product = requireProduct(request.getProductKey());
+
+        String deviceKey = request.getDeviceKey();
+        if (deviceKey == null || deviceKey.isBlank()) {
+            deviceKey = generateDeviceKey(request.getNamePrefix());
+        }
+        if (deviceMapper.selectCount(new LambdaQueryWrapper<Device>()
+                .eq(Device::getDeviceKey, deviceKey)) > 0) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "device_key 已存在: " + deviceKey);
+        }
+
+        String deviceName = request.getDeviceName() != null && !request.getDeviceName().isBlank()
+                ? request.getDeviceName() : deviceKey;
+        String secret = randomHex(16);
+
+        Device device = new Device();
+        device.setDeviceKey(deviceKey);
+        device.setProductKey(product.getProductKey());
+        device.setDeviceName(deviceName);
+        device.setDeviceSecret(secret);
+        device.setProjectId(product.getProjectId());
+        device.setOnlineStatus(0);
+        device.setStatus(1);
+        device.setCreatedAt(LocalDateTime.now());
+        device.setUpdatedAt(LocalDateTime.now());
+        deviceMapper.insert(device);
+
+        log.info("device registered: device_key={}, product_key={}", deviceKey, product.getProductKey());
+        return new DeviceRegisterVO(deviceKey, deviceName, secret);
+    }
+
+    @Override
+    public List<DeviceRegisterVO> registerBatch(DeviceRegisterRequest request) {
+        int count = request.getCount() == null ? 1 : request.getCount();
+        if (count < 1 || count > 1000) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "count 需在 1~1000 之间");
+        }
+        String prefix = request.getNamePrefix() != null && !request.getNamePrefix().isBlank()
+                ? request.getNamePrefix() : "dev";
+        String ts = LocalDateTime.now().format(KEY_TS);
+
+        List<DeviceRegisterVO> result = new ArrayList<>(count);
+        for (int i = 1; i <= count; i++) {
+            DeviceRegisterRequest one = new DeviceRegisterRequest();
+            one.setProductKey(request.getProductKey());
+            one.setDeviceName(prefix + "_" + i);
+            one.setDeviceKey("dev_" + prefix + "_" + ts + "_" + i);
+            result.add(register(one));
+        }
+        log.info("device batch registered: product_key={}, count={}", request.getProductKey(), count);
+        return result;
+    }
+
+    /**
+     * 心跳超时扫描：online=1 且超过 OFFLINE_TIMEOUT_SECONDS 无上报 → 置离线 + 写下线日志
+     * 每 30s 执行一次，走 idx_online 索引
+     */
+    @Scheduled(fixedDelay = 30_000)
+    public void offlineScan() {
+        LocalDateTime threshold = LocalDateTime.now().minusSeconds(OFFLINE_TIMEOUT_SECONDS);
+        List<Device> stale = deviceMapper.selectList(new LambdaQueryWrapper<Device>()
+                .eq(Device::getOnlineStatus, 1)
+                .lt(Device::getLastOnlineAt, threshold));
+        if (stale.isEmpty()) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        for (Device d : stale) {
+            deviceMapper.update(null, new LambdaUpdateWrapper<Device>()
+                    .set(Device::getOnlineStatus, 0)
+                    .set(Device::getLastOfflineAt, now)
+                    .set(Device::getUpdatedAt, now)
+                    .eq(Device::getId, d.getId())
+                    .eq(Device::getOnlineStatus, 1));
+            insertLog(d.getId(), 2, "心跳超时离线（> " + OFFLINE_TIMEOUT_SECONDS + "s 无上报）");
+        }
+        log.info("offline scan: {} devices -> OFFLINE", stale.size());
+    }
+
+    private Product requireProduct(String productKey) {
+        Product product = productMapper.selectOne(
+                new LambdaQueryWrapper<Product>().eq(Product::getProductKey, productKey));
+        if (product == null) {
+            throw new BizException(ErrorCode.DEVICE_NOT_FOUND, "产品不存在: " + productKey);
+        }
+        return product;
+    }
+
+    private String generateDeviceKey(String prefix) {
+        String base = prefix != null && !prefix.isBlank() ? prefix : "dev";
+        return "dev_" + base + "_" + randomHex(3);
+    }
+
+    private String randomHex(int bytes) {
+        byte[] buf = new byte[bytes];
+        RANDOM.nextBytes(buf);
+        StringBuilder sb = new StringBuilder();
+        for (byte b : buf) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
+    }
+
+    private void insertLog(Long deviceId, int logType, String content) {
+        DeviceLog logEntry = new DeviceLog();
+        logEntry.setDeviceId(deviceId);
+        logEntry.setLogType(logType);
+        logEntry.setContent(content);
+        logEntry.setCreatedAt(LocalDateTime.now());
+        deviceLogMapper.insert(logEntry);
     }
 }

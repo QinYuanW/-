@@ -1,9 +1,12 @@
 package com.iot.platform.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.iot.platform.dto.TelemetryRequest;
 import com.iot.platform.entity.Device;
+import com.iot.platform.entity.DeviceLog;
 import com.iot.platform.entity.DeviceTelemetry;
+import com.iot.platform.mapper.DeviceLogMapper;
 import com.iot.platform.mapper.DeviceMapper;
 import com.iot.platform.mapper.DeviceTelemetryMapper;
 import com.iot.platform.service.TelemetryService;
@@ -25,6 +28,7 @@ public class TelemetryServiceImpl implements TelemetryService {
 
     private final DeviceMapper deviceMapper;
     private final DeviceTelemetryMapper telemetryMapper;
+    private final DeviceLogMapper deviceLogMapper;
     private final StringRedisTemplate redisTemplate;
 
     @Override
@@ -54,11 +58,24 @@ public class TelemetryServiceImpl implements TelemetryService {
                 telemetryMapper.insert(t);
             }
 
-            // 3. 刷新在线状态
-            deviceMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Device>()
+            // 3. 刷新在线状态：条件更新 0→1 视为上线转换，写上线日志；已在线仅刷新 last_online_at
+            int transitioned = deviceMapper.update(null, new LambdaUpdateWrapper<Device>()
                     .set(Device::getOnlineStatus, 1)
                     .set(Device::getLastOnlineAt, LocalDateTime.now())
-                    .eq(Device::getId, deviceId));
+                    .eq(Device::getId, deviceId)
+                    .eq(Device::getOnlineStatus, 0));
+            if (transitioned > 0) {
+                DeviceLog logEntry = new DeviceLog();
+                logEntry.setDeviceId(deviceId);
+                logEntry.setLogType(1);
+                logEntry.setContent("设备上线（收到上报）");
+                logEntry.setCreatedAt(LocalDateTime.now());
+                deviceLogMapper.insert(logEntry);
+            } else {
+                deviceMapper.update(null, new LambdaUpdateWrapper<Device>()
+                        .set(Device::getLastOnlineAt, LocalDateTime.now())
+                        .eq(Device::getId, deviceId));
+            }
             log.info("telemetry saved: device_key={}, props={}", request.getDeviceKey(), request.getProperties().size());
         } catch (Exception e) {
             log.error("telemetry process failed: device_key={}", request.getDeviceKey(), e);

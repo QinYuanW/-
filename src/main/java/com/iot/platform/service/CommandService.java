@@ -6,4 +6,5 @@ import com.iot.platform.dto.CommandVO;
 public interface CommandService {
     CommandVO dispatch(String deviceKey, CommandRequest request);
     CommandVO getStatus(String requestId);
+    CommandVO ack(String requestId, boolean success);
 }
