@@ -85,6 +85,9 @@ public class TelemetryServiceImpl implements TelemetryService {
             log.info("telemetry saved: device_key={}, props={}", request.getDeviceKey(), request.getProperties().size());
         } catch (Exception e) {
             log.error("telemetry process failed: device_key={}", request.getDeviceKey(), e);
+            // 入库失败计数：供 Prometheus 告警 "入库失败率>1%"（B6）
+            meterRegistry.counter("iot_telemetry_process_failures_total",
+                    "result", "failed").increment();
         } finally {
             sample.stop(telemetryProcessTimer);
         }
