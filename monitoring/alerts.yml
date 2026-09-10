@@ -1,0 +1,45 @@
+# V2-B 告警规则（B6）
+groups:
+  - name: iot-platform-alerts
+    rules:
+      # 遥测异步线程池队列水位 >80%（容量 5000 → 4000）持续 2 分钟
+      - alert: IotTelemetryQueueHigh
+        expr: iot_telemetry_queue_pending > 4000
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "遥测线程池队列占用高"
+          description: "遥测异步线程池待处理队列水位 {{ $value }} > 4000（容量 80%），上游 or 入库可能成为瓶颈。"
+
+      # 接口 5xx 失败率 >1% 持续 2 分钟（覆盖入库失败等后端异常）
+      - alert: IotApiErrorRateHigh
+        expr: >
+          sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) by (uri)
+          / clamp_min(sum(rate(http_server_requests_seconds_count[5m])) by (uri), 1e-9) > 0.01
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "接口 5xx 失败率超过 1%"
+          description: "{{ $labels.uri }} 5 分钟失败率 {{ $value | humanizePercentage }} 超过 1%。"
+
+      # EMQX 失联：监测点连续抓取降为 0（up 指标）
+      - alert: EmqxInstanceDown
+        expr: up{job="emqx"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "EMQX 抓取失败"
+          description: "Prometheus 连续 1 分钟无法抓取 EMQX 指标，EMQX 可能宕机。"
+
+      # 后端抓取失败
+      - alert: IotPlatformDown
+        expr: up{job="iot-platform"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "后端服务抓取失败"
+          description: "Prometheus 无法访问后端 /actuator/prometheus，服务可能未启动。"

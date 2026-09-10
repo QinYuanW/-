@@ -1,0 +1,31 @@
+# Prometheus 全局 + 抓取抓配置
+global:
+  scrape_interval: 10s      # 默认抓取间隔
+  evaluation_interval: 10s  # 告警规则评估间隔
+
+# 告警规则文件
+rule_files:
+  - "/etc/prometheus/alerts.yml"
+
+# 告警通知到 Alertmanager
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  # 1) SpringBoot 后端：Micrometer + Actuator 指标（host.docker.internal 访问宿主机 8080）
+  - job_name: "iot-platform"
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["host.docker.internal:8080"]
+        labels:
+          service: iot-platform
+
+  # 2) EMQX 5.8：内置 Prometheus 统计端点（免认证）
+  - job_name: "emqx"
+    metrics_path: /api/v5/prometheus/stats
+    static_configs:
+      - targets: ["emqx:18083"]
+        labels:
+          service: emqx

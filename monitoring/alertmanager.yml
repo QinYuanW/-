@@ -1,0 +1,15 @@
+# Alertmanager 通知配置
+route:
+  group_by: ["alertname", "service"]
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 4h
+  receiver: "feishu-webhook"
+
+receivers:
+  - name: "feishu-webhook"
+    webhook_configs:
+      # 飞书群机器人 Webhook：把 xxxx 替换为你创建群机器人后得到的完整 URL。
+      # 例如 https://open.feishu.cn/open-apis/bot/v2/hook/9f9a-xxxxx
+      - url: "https://open.feishu.cn/open-apis/bot/v2/hook/__PLEASE_SET_FEISHU_WEBHOOK__"
+        send_resolved: true

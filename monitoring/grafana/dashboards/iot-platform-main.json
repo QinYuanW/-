@@ -1,0 +1,177 @@
+{
+  "title": "IoT Platform 可观测大盘 (V2-B)",
+  "uid": "iot-platform-main",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "timezone": "browser",
+  "tags": ["iot-platform"],
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "type": "row",
+      "title": "系统概况",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "JVM 堆内存",
+      "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 1 },
+      "targets": [{ "refId": "A", "expr": "max(jvm_memory_used_bytes{area=\"heap\"})", "editorMode": "code", "legendFormat": "heap-bytes" }],
+      "fieldConfig": {
+        "defaults": { "unit": "bytes" },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "JVM 非堆内存",
+      "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 1 },
+      "targets": [{ "refId": "A", "expr": "max(jvm_memory_used_bytes{area=\"nonheap\"})", "editorMode": "code", "legendFormat": "nonheap-bytes" }],
+      "fieldConfig": {
+        "defaults": { "unit": "bytes" },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "接口 QPS",
+      "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 1 },
+      "targets": [{ "refId": "A", "expr": "sum(rate(http_server_requests_seconds_count[$__rate_interval]))", "editorMode": "code", "legendFormat": "rps" }],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "color": { "mode": "palette-classic" } },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "gauge",
+      "title": "遥测线程池队列水位 (容量 5000)",
+      "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 1 },
+      "targets": [{ "refId": "A", "expr": "iot_telemetry_queue_pending", "editorMode": "code", "legendFormat": "pending" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "max": 5000,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 4000 },
+              { "color": "red", "value": 4500 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "接口 QPS by URI",
+      "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+      "targets": [{ "refId": "A", "expr": "sum(rate(http_server_requests_seconds_count[$__rate_interval])) by (uri)", "editorMode": "code", "legendFormat": "{{uri}}" }],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "接口耗时 P95",
+      "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
+      "targets": [{
+        "refId": "A",
+        "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket[$__rate_interval])) by (le))",
+        "editorMode": "code",
+        "legendFormat": "P95"
+      }],
+      "fieldConfig": {
+        "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "遥测上报→入库 链路耗时 (P95/P99)",
+      "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 17 },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum(rate(iot_telemetry_process_duration_seconds_bucket[$__rate_interval])) by (le))", "editorMode": "code", "legendFormat": "P95" },
+        { "refId": "B", "expr": "histogram_quantile(0.99, sum(rate(iot_telemetry_process_duration_seconds_bucket[$__rate_interval])) by (le))", "editorMode": "code", "legendFormat": "P99" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "遥测处理失败率",
+      "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 17 },
+      "targets": [{ "refId": "A", "expr": "sum(rate(iot_telemetry_process_failures_total[$__rate_interval]))", "editorMode": "code", "legendFormat": "failures/s" }],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "EMQX 当前连接数",
+      "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 25 },
+      "targets": [{ "refId": "A", "expr": "emqx_connections_count", "editorMode": "code", "legendFormat": "connections" }],
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "EMQX 报文收发速率",
+      "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 25 },
+      "targets": [
+        { "refId": "A", "expr": "rate(emqx_packets_received[$__rate_interval])", "editorMode": "code", "legendFormat": "recv" },
+        { "refId": "B", "expr": "rate(emqx_packets_sent[$__rate_interval])", "editorMode": "code", "legendFormat": "sent" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "pps", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      }
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "EMQX 保留消息数",
+      "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 25 },
+      "targets": [{ "refId": "A", "expr": "emqx_retained_count", "editorMode": "code", "legendFormat": "retained" }],
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": []
+      }
+    }
+  ]
+}

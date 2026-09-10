@@ -1,0 +1,25 @@
+# ---- 已独立的子仓库（各自有自己的 git 历史，勿以 gitlink 形式纳管） ----
+/iot-platform/
+/iot-console/
+
+# ---- 本地生成物 / 缓存 ----
+/tmp/
+/.trae/
+/.workbuddy/
+/draft_5881b0c8_folder/
+*.log
+build/
+dist/
+
+# ---- 操作系统 / 编辑器 ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.iml
+
+# ---- 敏感信息（如误放，禁止入库） ----
+*.pfx
+*.pem
+.env
+credentials*
