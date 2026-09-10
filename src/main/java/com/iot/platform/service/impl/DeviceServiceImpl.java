@@ -63,6 +63,7 @@ public class DeviceServiceImpl implements DeviceService {
         deviceMapper.selectPage(devicePage, wrapper);
 
         Page<DeviceVO> voPage = new Page<>(page, size, devicePage.getTotal());
+        // ← 每个 Device 实体 → 调 DeviceVO.from() → 变成 DeviceVO 实体
         voPage.setRecords(devicePage.getRecords().stream().map(DeviceVO::from).collect(Collectors.toList()));
         return voPage;
     }
@@ -150,16 +151,19 @@ public class DeviceServiceImpl implements DeviceService {
         String secret = randomHex(16);
 
         Device device = new Device();
+        // ── ② 从 Request 里拿用户传的字段 ──
         device.setDeviceKey(deviceKey);
         device.setProductKey(product.getProductKey());
         device.setDeviceName(deviceName);
-        device.setDeviceSecret(secret);
-        device.setProjectId(product.getProjectId());
-        device.setOnlineStatus(0);
-        device.setStatus(1);
-        device.setCreatedAt(LocalDateTime.now());
-        device.setUpdatedAt(LocalDateTime.now());
-        deviceMapper.insert(device);
+
+        // ── ③ Service 层自己补充的字段（用户根本没传）──
+        device.setDeviceSecret(secret);             // → 列 device_secret,后端生成的密钥
+        device.setProjectId(product.getProjectId()); // → 列 project_id,从 Product 表里查出来的
+        device.setOnlineStatus(0);                  // → 列 online_status,默认离线
+        device.setStatus(1);                        // → 列 status,默认正常
+        device.setCreatedAt(LocalDateTime.now());    // → 列 created_at,当前时间
+        device.setUpdatedAt(LocalDateTime.now());    // → 列 updated_at,当前时间
+        deviceMapper.insert(device);                 // → 插入数据库
 
         log.info("device registered: device_key={}, product_key={}", deviceKey, product.getProductKey());
         return new DeviceRegisterVO(deviceKey, deviceName, secret);

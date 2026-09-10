@@ -5,8 +5,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 @Data
-@Component
-@ConfigurationProperties(prefix = "jwt")
+@Component // 组件注解，将类注册为 Spring Bean
+@ConfigurationProperties(prefix = "jwt") // 配置属性前缀，用于绑定 application.yml 中的 jwt 配置
 public class JwtProperties {
 
     /** HS256 要求至少 32 字节 */

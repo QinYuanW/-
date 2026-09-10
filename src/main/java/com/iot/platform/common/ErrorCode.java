@@ -5,6 +5,7 @@ package com.iot.platform.common;
  */
 public final class ErrorCode {
 
+    //禁止外部 new ErrorCode()，防止实例化。
     private ErrorCode() {
     }
 

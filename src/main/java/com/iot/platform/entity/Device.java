@@ -6,7 +6,7 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("device")
+@TableName("device") // → 数据库表名
 public class Device {
 
     @TableId(type = IdType.AUTO)

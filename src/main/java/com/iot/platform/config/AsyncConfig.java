@@ -8,7 +8,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import java.util.concurrent.Executor;
 
 @Configuration
-@EnableAsync
+@EnableAsync  // 开启异步任务
 public class AsyncConfig {
 
     @Bean("telemetryExecutor")

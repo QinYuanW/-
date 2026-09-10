@@ -17,9 +17,14 @@ import java.util.List;
 import java.util.Map;
 
 @Slf4j
+/**
+ * @RestController 相当于你同时加了这两个注解
+ * @Controller // 告诉Spring：这是处理HTTP请求的「Web组件」
+ * @ResponseBody // 告诉Spring：所有方法的返回值直接当「HTTP响应体」返回（比如转成JSON）
+ */
 @RestController
 @RequestMapping("/api/v1")
-@RequiredArgsConstructor
+@RequiredArgsConstructor  // 自动生成构造器：public DeviceController(DeviceService deviceService)
 public class DeviceController {
 
     private final DeviceService deviceService;

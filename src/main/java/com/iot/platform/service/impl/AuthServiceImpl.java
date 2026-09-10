@@ -14,7 +14,7 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class AuthServiceImpl implements AuthService {
 
-    private final DeviceMapper deviceMapper;
+    private final DeviceMapper deviceMapper; // 注入设备映射器
     private final StringRedisTemplate redisTemplate;
 
     @Override

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.iot.platform.entity.Device;
 import lombok.Data;
 
+//	设备响应体
 @Data
 public class DeviceVO {
 
@@ -24,6 +25,7 @@ public class DeviceVO {
     @JsonProperty("last_online_at")
     private String lastOnlineAt;
 
+    // ── ② DeviceVO 从 Device 实体转换而来──── 专门负责裁剪的静态工厂方法
     public static DeviceVO from(Device d) {
         DeviceVO vo = new DeviceVO();
         vo.setId(d.getId());

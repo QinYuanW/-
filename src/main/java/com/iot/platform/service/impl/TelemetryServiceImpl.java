@@ -43,7 +43,7 @@ public class TelemetryServiceImpl implements TelemetryService {
                 return;
             }
 
-            // 2. 遍历 properties 逐条入库
+            // 2. 遍历 properties 逐条入库(把上报报文里的每个属性，拆成一条独立的数据库记录)
             LocalDateTime ts = request.getTs() != null
                     ? LocalDateTime.ofInstant(Instant.ofEpochMilli(request.getTs()), ZoneId.of("Asia/Shanghai"))
                     : LocalDateTime.now();

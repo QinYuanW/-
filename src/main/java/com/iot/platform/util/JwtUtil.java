@@ -21,7 +21,8 @@ public class JwtUtil {
         return Keys.hmacShaKeyFor(jwtProperties.getSecret().getBytes(StandardCharsets.UTF_8));
     }
 
-    public String generate(String username, Long userId, Integer role) {
+        /** 生成 JWT 生成 token */
+           public String generate(String username, Long userId, Integer role) {
         Date now = new Date();
         Date expiry = new Date(now.getTime() + jwtProperties.getExpire() * 1000L);
         return Jwts.builder()
@@ -33,12 +34,12 @@ public class JwtUtil {
                 .signWith(key())
                 .compact();
     }
-
-    public Claims parse(String token) {
+        /** 解析 JWT token */
+        public Claims parse(String token) {
         return Jwts.parser()
-                .verifyWith(key())
+                .verifyWith(key()) // 用配置的 secret 验签
                 .build()
-                .parseSignedClaims(token)
-                .getPayload();
+                .parseSignedClaims(token) // 解析并校验签名、过期时间等
+                .getPayload();  // 取出 Payload（uid/role/sub 等声明）
     }
 }
