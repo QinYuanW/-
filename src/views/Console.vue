@@ -18,17 +18,20 @@
 
     <div class="layout">
       <aside class="sidebar">
-        <DeviceList
-          :devices="devices"
-          :selected-key="selectedKey"
-          :loading="deviceLoading"
-          :total="total"
-          :page="page"
-          :size="size"
-          @select="handleSelect"
-          @search="handleSearch"
-          @page-change="handlePageChange"
-        />
+        <DeviceRegister @registered="loadDevices" />
+        <div class="sidebar-list">
+          <DeviceList
+            :devices="devices"
+            :selected-key="selectedKey"
+            :loading="deviceLoading"
+            :total="total"
+            :page="page"
+            :size="size"
+            @select="handleSelect"
+            @search="handleSearch"
+            @page-change="handlePageChange"
+          />
+        </div>
       </aside>
 
       <main class="main">
@@ -74,6 +77,7 @@
                 :device-key="selectedKey"
                 :tsl="tsl"
                 :telemetry="latest"
+                @executed="handleExecuted"
               />
             </div>
           </div>
@@ -90,6 +94,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import DeviceList from '../components/DeviceList.vue'
+import DeviceRegister from '../components/DeviceRegister.vue'
 import MetricCards from '../components/MetricCards.vue'
 import HistoryChart from '../components/HistoryChart.vue'
 import ControlPanel from '../components/ControlPanel.vue'
@@ -168,6 +173,10 @@ async function loadLatest() {
   } finally {
     telemetryLoading.value = false
   }
+}
+
+function handleExecuted({ key, value }) {
+  latest.value = { ...latest.value, [key]: value }
 }
 
 async function handleLogout() {
@@ -251,6 +260,13 @@ onBeforeUnmount(() => {
 }
 
 .sidebar {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-list {
+  flex: 1;
   min-height: 0;
 }
 

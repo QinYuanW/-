@@ -29,6 +29,10 @@ http.interceptors.response.use(
     return body
   },
   (err) => {
+    if (err.response?.status === 401) {
+      localStorage.removeItem('iot_token')
+      router.push('/login')
+    }
     ElMessage.error(err.response?.data?.message || err.message || '网络错误')
     return Promise.reject(err)
   }
@@ -54,5 +58,11 @@ export const dispatchCommand = (deviceKey, commandType, payload) =>
 
 export const getCommandStatus = (requestId) =>
   http.get(`/commands/${requestId}`)
+
+export const registerDevice = (data) =>
+  http.post('/devices', data)
+
+export const registerBatch = (data) =>
+  http.post('/devices/batch', data)
 
 export default http

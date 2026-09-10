@@ -73,7 +73,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import { dispatchCommand, getCommandStatus } from '../api'
 
@@ -82,6 +82,7 @@ const props = defineProps({
   tsl: { type: Object, default: null },
   telemetry: { type: Object, default: () => ({}) }
 })
+const emit = defineEmits(['executed'])
 
 const controls = computed(() =>
   (props.tsl?.properties || []).filter((p) => p.access === 'readwrite')
@@ -90,6 +91,7 @@ const services = computed(() => props.tsl?.services || [])
 
 const sendingKey = ref('')
 const lastCommand = ref(null)
+const optimistic = ref({})
 let statusTimer = null
 
 const STATUS_MAP = {
@@ -104,24 +106,33 @@ const statusText = computed(() => (lastCommand.value ? STATUS_MAP[lastCommand.va
 const statusClass = computed(() => (lastCommand.value ? STATUS_MAP[lastCommand.value.status]?.cls || '' : ''))
 
 function boolValue(key) {
-  const v = props.telemetry[key]
+  const v = optimistic.value[key] ?? props.telemetry[key]
   return v === true || v === 'true' || v === 1 || v === '1'
 }
 
 function numValue(key) {
-  const n = Number(props.telemetry[key])
+  const v = optimistic.value[key] ?? props.telemetry[key]
+  const n = Number(v)
   return Number.isNaN(n) ? 0 : n
 }
 
+// 遥测刷新到该键后释放乐观覆盖，恢复真实数据驱动
+watch(() => props.telemetry, (t) => {
+  for (const key of Object.keys(optimistic.value)) {
+    if (key in t) delete optimistic.value[key]
+  }
+}, { deep: true })
+
 async function sendProperty(prop, value) {
   sendingKey.value = prop.key
+  optimistic.value[prop.key] = value
   try {
-    const res = await dispatchCommand(props.deviceKey, 1, { property_key: prop.key, value })
+    const res = await dispatchCommand(props.deviceKey, 1, { [prop.key]: value })
     lastCommand.value = res.data
     ElMessage.success(`已下发「${prop.name}」`)
-    startPolling(res.data.request_id)
+    startPolling(res.data.request_id, prop.key, value)
   } catch (e) {
-    // 拦截器已提示
+    delete optimistic.value[prop.key]
   } finally {
     sendingKey.value = ''
   }
@@ -141,13 +152,20 @@ async function callService(svc) {
   }
 }
 
-function startPolling(requestId) {
+function startPolling(requestId, propKey, propValue) {
   if (statusTimer) clearInterval(statusTimer)
   statusTimer = setInterval(async () => {
     try {
       const res = await getCommandStatus(requestId)
       lastCommand.value = res.data
-      if ([2, 3, 4].includes(res.data.status)) {
+      if (res.data.status === 2) {
+        // 设备已执行 → 乐观更新本地状态，不等下一次遥测轮询
+        if (propKey !== undefined) emit('executed', { key: propKey, value: propValue })
+        clearInterval(statusTimer)
+        statusTimer = null
+      } else if ([3, 4].includes(res.data.status)) {
+        // 失败/超时 → 回滚乐观覆盖
+        if (propKey !== undefined) delete optimistic.value[propKey]
         clearInterval(statusTimer)
         statusTimer = null
       }
