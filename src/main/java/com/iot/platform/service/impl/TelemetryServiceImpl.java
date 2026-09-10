@@ -2,6 +2,8 @@ package com.iot.platform.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import com.iot.platform.dto.TelemetryRequest;
 import com.iot.platform.entity.Device;
 import com.iot.platform.entity.DeviceLog;
@@ -30,10 +32,14 @@ public class TelemetryServiceImpl implements TelemetryService {
     private final DeviceTelemetryMapper telemetryMapper;
     private final DeviceLogMapper deviceLogMapper;
     private final StringRedisTemplate redisTemplate;
+    private final MeterRegistry meterRegistry;
+    private final Timer telemetryProcessTimer;
 
     @Override
     @Async("telemetryExecutor")
     public void process(TelemetryRequest request) {
+        // 埋点：上报→入库 全链路耗时（B5）
+        Timer.Sample sample = Timer.start(meterRegistry);
         try {
             log.info("telemetry received: device_key={}, props={}", request.getDeviceKey(), request.getProperties());
             // 1. device_key → device_id 映射（Redis 缓存）
@@ -79,6 +85,8 @@ public class TelemetryServiceImpl implements TelemetryService {
             log.info("telemetry saved: device_key={}, props={}", request.getDeviceKey(), request.getProperties().size());
         } catch (Exception e) {
             log.error("telemetry process failed: device_key={}", request.getDeviceKey(), e);
+        } finally {
+            sample.stop(telemetryProcessTimer);
         }
     }
 

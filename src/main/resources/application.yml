@@ -15,6 +15,10 @@ spring:
     url: jdbc:mysql://localhost:3306/iot_platform?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8&allowPublicKeyRetrieval=true
     username: iot
     password: 123456
+    hikari:
+      # 修复 Hikari connection broken WARN：自动验证连接有效性，maxLifetime 短于 MySQL 自动断开时间
+      max-lifetime: 180000  # 3 分钟
+      connection-timeout: 30000
 
   # Redis：设备在线状态 / 鉴权凭据缓存
   data:
@@ -50,3 +54,21 @@ jwt:
 logging:
   level:
     com.iot.platform: debug
+
+# Actuator 配置：暴露健康检查和 Prometheus 端点
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus,info
+  endpoint:
+    health:
+      show-details: always  # 总是显示详细健康信息（含各组件状态）
+  health:
+    db:
+      enabled: true
+    redis:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
