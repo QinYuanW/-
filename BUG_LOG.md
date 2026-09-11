@@ -2,6 +2,19 @@
 
 > 每解决一个问题/BUG 立即追加记录：现象 / 场景 / 排查根因 / 状态
 
+## 2026-09-11
+
+### BUG-18：D1 端到端可靠性压测——Kafka 段 offset 续消费生效，但 EMQX webhook `request_ttl=45s` 在突发+后端宕机时过期丢弃 10798 条
+
+- **现象**：以 qos0 向 `dev_single_check_001` 瞬间灌入 20000 条遥测（≈1 万条/s），消费进行中（DB 仅 879 条）`taskkill /F` 崩溃后端；重启后 DB count 先续涨到 9202 后长期稳定在 9202，未达 20000，缺口 ≈10800 条。
+- **场景**：D1 阶段 Kafka 链路端到端可靠性验证（EMQX→webhook→后端 KafkaProducer(acks=all)→topic `iot.telemetry`→消费者组(手动 ack)→MySQL）。
+- **排查根因**（用 EMQX 规则/action metrics 定位）：
+  1. **Kafka 段可靠、offset 续消费生效**：崩溃时 DB 879 → 重启后靠 Kafka 已持久化副本恢复到 9202；`kafka-consumer-groups --describe` 显示 `LAG=0`（消费者追平），partition 1 `LOG-END-OFFSET=11011` 全部消费。证明「后端重启丢在途→offset 续消费」已达成。⚠️ 但 note：producer 用同一 `device_key` 作 key 哈希到单一 partition（0/2 为空），属正常。
+  2. **入口边界丢消息**：EMQX webhook action `fwd_telemetry` metrics：`matched=21802 / success=10314 / dropped=10798`，其中 `dropped.expired=10798`（**全部因 `request_ttl=45s` 过期**）。即 20000 条突发中，仅 ~11011 条在宕机窗口内成功 POST 到后端（含 EMQX webhook at-least-once 重发产生的重复记录 → Kafka 11011 记录去重后 distinct seq=9202）；其余 ~10800 条在 EMQX 侧排队等待时 `request_ttl` 过期被丢弃，**从未进入 Kafka**。
+- **结论**：D1 把耐久性下沉到 Kafka 后，**后端重启不再丢已在 Kafka 中的消息**（核心目标达成）；但 **EMQX→后端 webhook 仍是尽力而为 HTTP，后端宕机超 `request_ttl`（45s) 时突发积压消息会被过期丢弃**，这是此前 Webhook 可靠性分析中"EMQX 缓冲 45s TTL"边界的具体化。
+- **修复方向（待评估）**：① 调大 EMQX webhook `request_ttl` / `max_buffer_bytes`（缓解但治标）；② 后端 `/api/v1/telemetry` 改为异步 `send()`（不阻塞 `.get`），webhook 快速返回、避免 EMQX 积压，耐久性交给 Kafka（治本，需再验 crash 时生产者在途缓冲）；③ 入库幂等以吸收 webhook 重发的重复记录（对应 D2）。
+- **状态**：📌 已定位并量化；Kafka 段已闭环（offset 续消费验证通过），webhook 入口边界待 D1 收尾或 D2 处理。
+
 ## 2026-09-10
 
 ### BUG-16：V2-B 可观测性验证时 Hikari 拿不到连接（MySQL 服务 STOPPED）

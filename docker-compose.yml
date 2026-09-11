@@ -76,7 +76,36 @@ services:
     depends_on:
       - prometheus
 
+  # D1：单节点 Kafka（KRaft，无 ZooKeeper）
+  # 双 listener：INTERNAL(kafka:29092) 供同栈 EMQX bridge；EXTERNAL(localhost:9092) 供宿主机 Java 消费者
+  kafka:
+    image: apache/kafka:3.9.0
+    container_name: kafka
+    restart: unless-stopped
+    ports:
+      - "9092:9092"
+    environment:
+      # 官方(apache/kafka 镜像) KRaft 双通信 listener 写法：
+      # DOCKER(kafka:29092) 供同栈 EMQX bridge；HOST(localhost:9092) 供宿主机 Java 消费者；CONTROLLER 内部选主
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9091
+      KAFKA_LISTENERS: CONTROLLER://localhost:9091,HOST://0.0.0.0:9092,DOCKER://0.0.0.0:29092
+      KAFKA_INTER_BROKER_LISTENER_NAME: DOCKER
+      KAFKA_ADVERTISED_LISTENERS: HOST://localhost:9092,DOCKER://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,DOCKER:PLAINTEXT,HOST:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 3
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+
 volumes:
   emqx_data:
   emqx_log:
   redis_data:
+  kafka_data:
