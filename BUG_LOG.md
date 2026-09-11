@@ -45,6 +45,31 @@
   3. 二次发布同批 3 条（90000-90002）→ 因 EMQX 时间戳不同按"新数据"落 6 行/3 distinct（重发布时间戳理应新落），真重放仍由键去重 ✅
 - **状态**：✅ 已修复（D2 幂等语义修正）；`db/schema.sql` 与 `BUG_LOG` 已同步。运行库已 ALTER，当前后端 jar 无需重建。
 
+### BUG-21：D2 消费端失败记录被后续 ack「越过」→ 遥测静默丢失（无重试、无死信）
+
+- **现象**：向 `iot.telemetry` 连续投递 A（缺 `properties`，`processSync` 返回 false）与 B（合法，成功落库）两条同设备消息后，partition 2 的 `CURRENT-OFFSET` 从 2 **直接跳到 4**，A 所在的 offset 2 被永久跨过；`iot_telemetry_process_failures_total` 全程停在 1.0（A 从未重试）；`kafka-topics --list` 无死信 topic。
+- **场景**：D2-2 背压设计前的语义实验（`docs/05_压测报告/D2-2_消费端ack语义实验报告.md`）。
+- **排查根因**：
+  1. `TelemetryKafkaListener` 对失败记录只 `log.warn` 不 ack，本意"留给后续重试"——**但重试策略不存在**（`KafkaConfig` 无 `DefaultErrorHandler` / `@RetryableTopic`）。
+  2. `AckMode.MANUAL` 的 `acknowledge()` 提交的是**分区位点**（后一条记录的 offset+1），容器待提交位点以 `TopicPartition` 为键、被高 offset 覆盖 → 失败记录被"越过"。
+  3. `TelemetryServiceImpl` 用同一个 `false` 表示「unknown device（永久）」与「DB 异常（瞬时）」，无法差异化处理。
+- **严重性**：🔴 Blocker。任何 DB 瞬断/超时/毒丸数据，其遥测都会在下一条成功消息到达时被永久跳过，与 D1「后端重启不丢在途」的目标直接冲突（D1 解决"重启丢"，此处暴露"失败丢"）。
+- **修复方向（D2-2 待实施）**：① 失败分类（永久 vs 瞬时）；② `@RetryableTopic` 非阻塞重试阶梯 retry-0/1/2（退避 1→2→4s），失败消息移出主分区 → 根除"越过"；③ `iot.telemetry-dlt` 死信 + `iot_telemetry_dlt_total`；④ `max.poll.records` 与 `max.poll.interval.ms` 配比防 rebalance 风暴；⑤ 与 D2-1 唯一键协同，重试天然幂等。
+- **状态**：✅ **已修复并经运行验证闭合**（方案 A：`@RetryableTopic` 非阻塞重试阶梯 + DLT）。改动 6 改 1 增，详见 `docs/05_压测报告/D2-2_消费端ack语义实验报告.md` §7（实施）/ §8（运行验证）。
+  **运行验证（2026-09-11 19:48–19:51，三项全绿）**：
+  ① 永久失败（未注册设备 `ghost_perm_001`）→ `failures{result="permanent"}=1`、`dlt_total=1`，且 `retry-0/1/2` 位点仍为 0（**未进重试阶梯**，跳级直达 DLT）；
+  ② 瞬时失败（`dev_demo_001` + 超长 value 触发 MySQL STRICT error 1406）→ `failures{result="retryable"}=4`（= `attempts=4`），消息依次流经 `retry-0→1→2`（T+2.0s / T+7.1s 采样可见）后落入 DLT；
+  ③ 复刻案发现场（同 key 背靠背「先失败 → 后成功」）→ 成功消息**入库 1 行** 且 失败消息**完整留存于 DLT**（`dlt_total=3`），主分区位点 5→7，**零丢失**。
+  ⚠️ **附带架构后果**：D1 的 `AckMode.MANUAL` 必须撤掉 —— `@RetryableTopic` 不支持手动 ack；且手动 ack 本身就是本 bug 成因。
+  「消费成功才确认」改由「容器托管提交 + 重试阶梯/死信 + D2-1 唯一键幂等」三件套共同兑现。
+
+### 备注：测试工装坑（非 BUG，避免误判）
+
+- **现象**：`curl.exe -d '{"device_key":...}'`（PowerShell 5.1 直接拼参）向 `/api/v1/telemetry` 发合法 payload，后端却稳定返回 `{"code":5000,"message":"服务内部错误"}`，一度误判为后端 bug。
+- **根因**：PowerShell 5.1 向原生 exe 传含双引号的实参会**吞掉引号**，请求体损坏触发后端 catch。
+- **修复/规避**：把 JSON 写入文件，用 `curl.exe --data-binary "@file.json"` 传文件体（同一 payload 立即返回 `{"code":0,"message":"ok"}`）。
+- **状态**：✅ 已规避（教训已写入实验报告附录）。
+
 ## 2026-09-10
 
 ### BUG-16：V2-B 可观测性验证时 Hikari 拿不到连接（MySQL 服务 STOPPED）
