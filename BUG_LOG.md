@@ -15,6 +15,18 @@
 - **修复方向（待评估）**：① 调大 EMQX webhook `request_ttl` / `max_buffer_bytes`（缓解但治标）；② 后端 `/api/v1/telemetry` 改为异步 `send()`（不阻塞 `.get`），webhook 快速返回、避免 EMQX 积压，耐久性交给 Kafka（治本，需再验 crash 时生产者在途缓冲）；③ 入库幂等以吸收 webhook 重发的重复记录（对应 D2）。
 - **状态**：📌 已定位并量化；Kafka 段已闭环（offset 续消费验证通过），webhook 入口边界待 D1 收尾或 D2 处理。
 
+### BUG-19：D2 消费端幂等去重——at-least-once 重放导致数千条遥测重复落库
+
+- **现象**：D1 崩溃恢复压测中，Kafka partition 1 有 11011 条记录但 DB 去重后仅 9202 个 distinct seq；`device_telemetry` 全表存在 **4061 个重复组、31550 条多余行**（多轮压测 + webhook 重发 + offset 重放积累）。
+- **场景**：D1 引入 Kafka 后 at-least-once 语义（崩溃未 ack 的消息重启后重放 + EMQX webhook 至少一次重发），而 `device_telemetry` 原只有主键 `(id,ts)`，对业务键 `(device_id, property_key, ts)` 无唯一约束，重复插入无拦截。
+- **排查根因**：写入路径 `insertBatch` 是普通 multi-values INSERT，无幂等；同一设备同一属性同一 `ts` 的同一条上报被重复插入成多条行，无约束兜底。
+- **修复（D2 幂等去重）**：
+  1. **清存量**：`DELETE t1 ... JOIN t2 ... AND t1.id > t2.id` 保留每组最小 id，删除 31550 条多余行（total 461176→429626）。
+  2. **加唯一约束**：`ALTER TABLE device_telemetry ADD UNIQUE KEY uk_device_prop_ts (device_id, property_key, ts)`——唯一键含分区列 `ts`，满足分区表要求；删冗余 `idx_device_prop_ts`；同步 `db/schema.sql`。
+  3. **改写入**：`DeviceTelemetryMapper.insertBatch` 追加 `ON DUPLICATE KEY UPDATE id = id`（冲突时无实际变更 → 吞掉重复、不报错、不中断批量、保留首行）。
+- **验证**：同一遥测 JSON（固定 ts）向 Kafka 投递 3 次 → DB 仅落 3 行（每属性 1 份），重复被吞、无 DuplicateKeyException、正常新数据不受影响 ✅
+- **状态**：✅ 幂等去重完成（D2 前半）；背压「消费不过来时不丢消息」待 D2-2 后续处理。
+
 ## 2026-09-10
 
 ### BUG-16：V2-B 可观测性验证时 Hikari 拿不到连接（MySQL 服务 STOPPED）
