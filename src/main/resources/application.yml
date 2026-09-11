@@ -31,8 +31,8 @@ spring:
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
-    # 开发期打印 SQL，上线前移除
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    # 压测定位：V2-C 移除控制台 SQL 日志（曾是写路径吞吐首要瓶颈，BUG-17 §3.1）
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
   global-config:
     db-config:
       # 逻辑删除：与 schema.sql 的 deleted 字段对齐（0 未删 / 1 已删）

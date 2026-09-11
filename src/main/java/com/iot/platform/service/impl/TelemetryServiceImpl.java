@@ -18,9 +18,12 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 @Slf4j
@@ -35,8 +38,11 @@ public class TelemetryServiceImpl implements TelemetryService {
     private final MeterRegistry meterRegistry;
     private final Timer telemetryProcessTimer;
 
+    /** 设备在线状态聚合刷新窗口：窗口内每设备只写一次 device 表，缓和高并发 hot-row 锁竞争（BUG-17 §3.3） */
+    private static final Duration ONLINE_FLUSH_WINDOW = Duration.ofSeconds(5);
+
     @Override
-    @Async("telemetryExecutor")
+    @Async("telemetryExecutor") // 异步处理遥测数据
     public void process(TelemetryRequest request) {
         // 埋点：上报→入库 全链路耗时（B5）
         Timer.Sample sample = Timer.start(meterRegistry);
@@ -49,11 +55,12 @@ public class TelemetryServiceImpl implements TelemetryService {
                 return;
             }
 
-            // 2. 遍历 properties 逐条入库(把上报报文里的每个属性，拆成一条独立的数据库记录)
+            // 2. 批量入库：同一上报报文的多个属性拼成一条 multi-values INSERT（BUG-17 §3.2）
             LocalDateTime ts = request.getTs() != null
                     ? LocalDateTime.ofInstant(Instant.ofEpochMilli(request.getTs()), ZoneId.of("Asia/Shanghai"))
                     : LocalDateTime.now();
 
+            List<DeviceTelemetry> telemList = new ArrayList<>(request.getProperties().size());
             for (Map.Entry<String, Object> entry : request.getProperties().entrySet()) {
                 DeviceTelemetry t = new DeviceTelemetry();
                 t.setDeviceId(deviceId);
@@ -61,26 +68,18 @@ public class TelemetryServiceImpl implements TelemetryService {
                 t.setValue(String.valueOf(entry.getValue()));
                 t.setValueType(inferValueType(entry.getValue()));
                 t.setTs(ts);
-                telemetryMapper.insert(t);
+                telemList.add(t);
+            }
+            if (!telemList.isEmpty()) {
+                telemetryMapper.insertBatch(telemList);
             }
 
-            // 3. 刷新在线状态：条件更新 0→1 视为上线转换，写上线日志；已在线仅刷新 last_online_at
-            int transitioned = deviceMapper.update(null, new LambdaUpdateWrapper<Device>()
-                    .set(Device::getOnlineStatus, 1)
-                    .set(Device::getLastOnlineAt, LocalDateTime.now())
-                    .eq(Device::getId, deviceId)
-                    .eq(Device::getOnlineStatus, 0));
-            if (transitioned > 0) {
-                DeviceLog logEntry = new DeviceLog();
-                logEntry.setDeviceId(deviceId);
-                logEntry.setLogType(1);
-                logEntry.setContent("设备上线（收到上报）");
-                logEntry.setCreatedAt(LocalDateTime.now());
-                deviceLogMapper.insert(logEntry);
-            } else {
-                deviceMapper.update(null, new LambdaUpdateWrapper<Device>()
-                        .set(Device::getLastOnlineAt, LocalDateTime.now())
-                        .eq(Device::getId, deviceId));
+            // 3. 时间窗聚合刷新在线状态：5s 窗口内每设备只写一次 device 表（BUG-17 §3.3），
+            //    跨 worker 用 Redis SETNX 原子协调，消除高并发 hot-row 锁竞争。
+            Boolean first = redisTemplate.opsForValue()
+                    .setIfAbsent("onl:" + deviceId, "1", ONLINE_FLUSH_WINDOW);
+            if (Boolean.TRUE.equals(first)) {
+                refreshOnline(deviceId);
             }
             log.info("telemetry saved: device_key={}, props={}", request.getDeviceKey(), request.getProperties().size());
         } catch (Exception e) {
@@ -90,6 +89,28 @@ public class TelemetryServiceImpl implements TelemetryService {
                     "result", "failed").increment();
         } finally {
             sample.stop(telemetryProcessTimer);
+        }
+    }
+
+    /** 在线状态写入：条件更新 0→1 视为上线转换并写上线日志；已在线仅刷新 last_online_at */
+    private void refreshOnline(Long deviceId) {
+        LocalDateTime now = LocalDateTime.now();
+        int transitioned = deviceMapper.update(null, new LambdaUpdateWrapper<Device>()
+                .set(Device::getOnlineStatus, 1)
+                .set(Device::getLastOnlineAt, now)
+                .eq(Device::getId, deviceId)
+                .eq(Device::getOnlineStatus, 0));
+        if (transitioned > 0) {
+            DeviceLog logEntry = new DeviceLog();
+            logEntry.setDeviceId(deviceId);
+            logEntry.setLogType(1);
+            logEntry.setContent("设备上线（收到上报）");
+            logEntry.setCreatedAt(now);
+            deviceLogMapper.insert(logEntry);
+        } else {
+            deviceMapper.update(null, new LambdaUpdateWrapper<Device>()
+                    .set(Device::getLastOnlineAt, now)
+                    .eq(Device::getId, deviceId));
         }
     }
 

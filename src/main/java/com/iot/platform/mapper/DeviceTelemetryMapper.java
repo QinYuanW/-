@@ -2,7 +2,9 @@ package com.iot.platform.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.iot.platform.entity.DeviceTelemetry;
+import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
@@ -16,4 +18,14 @@ public interface DeviceTelemetryMapper extends BaseMapper<DeviceTelemetry> {
             "WHERE device_id = #{deviceId} GROUP BY property_key) latest " +
             "ON t.device_id = #{deviceId} AND t.property_key = latest.property_key AND t.ts = latest.max_ts")
     List<Map<String, String>> selectLatestByDevice(Long deviceId);
+
+    /**
+     * 批量插入：一条 multi-values INSERT 代替逐条，显著降低写路径往返次数（BUG-17 §3.2）。
+     * 调用方保证 list 内 ts 相同（同一设备的同一上报报文），避免跨分区。
+     */
+    @Insert("<script>INSERT INTO device_telemetry (device_id, property_key, value, value_type, ts) VALUES " +
+            "<foreach collection='list' item='t' separator=','>" +
+            "(#{t.deviceId}, #{t.propertyKey}, #{t.value}, #{t.valueType}, #{t.ts})" +
+            "</foreach></script>")
+    int insertBatch(@Param("list") List<DeviceTelemetry> list);
 }

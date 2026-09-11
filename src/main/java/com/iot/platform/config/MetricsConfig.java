@@ -29,12 +29,12 @@ public class MetricsConfig {
 
     /**
      * 遥测异步线程池队列水位 Gauge：当前队列中等待处理的任务数。
-     * 水位超过 80%（5000 容量对应 4000）需告警（B6）。
+     * 水位过高时排队达到降级(丢弃)阈值需告警（B6）。容量 20000（V2-C 扩容）。
      */
     @Bean
     public Gauge telemetryQueueWatermark(ThreadPoolTaskExecutor telemetryExecutor, MeterRegistry registry) {
         return Gauge.builder("iot_telemetry_queue_pending", telemetryExecutor, ThreadPoolTaskExecutor::getQueueSize)
-                .description("Telemetry async executor pending queue size (capacity 5000)")
+                .description("Telemetry async executor pending queue size (capacity 20000)")
                 .register(registry);
     }
 }
