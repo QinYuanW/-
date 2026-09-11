@@ -49,10 +49,18 @@
             <artifactId>spring-boot-starter-data-redis</artifactId>
         </dependency>
 
-        <!-- Kafka：D1 数据链路演进（持久化解耦，生产者 ack=all + 消费者组手动 ack） -->
+        <!-- Kafka：D1 数据链路演进（持久化解耦，生产者 ack=all + 消费者容器托管 offset） -->
         <dependency>
             <groupId>org.springframework.kafka</groupId>
             <artifactId>spring-kafka</artifactId>
+        </dependency>
+
+        <!-- D2-2 消费端背压：@RetryableTopic 的 backoff 属性类型来自 spring-retry
+             （org.springframework.retry.annotation.Backoff），显式声明以消除传递依赖的不确定性。
+             版本由 Spring Boot BOM 管理（当前 2.0.5），无需手写。 -->
+        <dependency>
+            <groupId>org.springframework.retry</groupId>
+            <artifactId>spring-retry</artifactId>
         </dependency>
 
         <!-- 参数校验 -->

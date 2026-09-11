@@ -15,7 +15,11 @@ import org.apache.kafka.common.serialization.StringSerializer;
 
 /**
  * D1 Kafka 配置：ProducerFactory + KafkaTemplate（EMQX webhook 回调 → Controller → send to Kafka）
- * Consumer 用 MANUAL ack：落库成功才提交 offset，实现「消费成功才确认、不丢在途」。
+ *
+ * <p>D2-2 变更：消费端 ack 由 MANUAL 改为容器托管（RECORD）。
+ * ① {@code @RetryableTopic} 不支持手动 ack（重试/DLT 容器依赖容器托管提交）；
+ * ② 手动 ack 本身就是 BUG-21 静默丢数据的成因（提交的是分区位点，会越过未 ack 的失败记录）。
+ * 「不丢」改由「非阻塞重试阶梯 + 死信隔离 + D2-1 唯一键幂等」共同保证。
  */
 @Configuration
 @EnableKafka
@@ -39,7 +43,11 @@ public class KafkaConfig {
         return new KafkaTemplate<>(producerFactory);
     }
 
-    /** 手动 ack 容器工厂：消费者进程内同步落库成功后才 acknowledge，offset 提交随之发生 */
+    /**
+     * 消费容器工厂：topic 3 个分区 → 3 个并发消费线程。
+     * ack 模式取容器托管的 RECORD（每条记录处理成功即提交；失败则转交重试 topic，主分区照常推进），
+     * 这同时满足 {@code @RetryableTopic} 的要求并根除 BUG-21 的"越过"问题。
+     */
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, String> kafkaListenerContainerFactory(
             ConsumerFactory<String, String> consumerFactory) {
@@ -48,7 +56,7 @@ public class KafkaConfig {
         factory.setConsumerFactory(consumerFactory);
         // topic 3 个分区 → 并发 3 个消费线程
         factory.setConcurrency(3);
-        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL);
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
         return factory;
     }
 }

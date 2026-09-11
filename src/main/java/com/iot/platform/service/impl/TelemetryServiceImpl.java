@@ -2,6 +2,7 @@ package com.iot.platform.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.iot.platform.common.PermanentTelemetryException;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import com.iot.platform.dto.TelemetryRequest;
@@ -44,11 +45,20 @@ public class TelemetryServiceImpl implements TelemetryService {
     @Override
     @Async("telemetryExecutor") // 历史链路（EMQX→@Async 直推）兼容包装；D1 后由 Kafka 消费者调 processSync
     public void process(TelemetryRequest request) {
-        processSync(request);
+        try {
+            processSync(request);
+        } catch (Exception e) {
+            // 异步链路没有重试框架兜底，异常到线程池只会变成噪音日志；失败计数已在 processSync 内累加
+            log.error("async telemetry process failed: device_key={}", request.getDeviceKey(), e);
+        }
     }
 
+    /**
+     * D2-2：失败一律抛异常，交由 {@code @RetryableTopic} 分级（永久 → DLT / 瞬时 → 退避重试）。
+     * 不再返回 boolean —— 那会让调用方"跳过 ack"，被后一条成功消息的 ack 越过而静默丢数据（BUG-21）。
+     */
     @Override
-    public boolean processSync(TelemetryRequest request) {
+    public void processSync(TelemetryRequest request) {
         // 埋点：上报→入库 全链路耗时（B5）
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
@@ -56,11 +66,16 @@ public class TelemetryServiceImpl implements TelemetryService {
             // 1. device_key → device_id 映射（Redis 缓存）
             Long deviceId = resolveDeviceId(request.getDeviceKey());
             if (deviceId == null) {
-                log.warn("unknown device_key: {}", request.getDeviceKey());
-                return false;
+                // 永久失败：设备从未注册，重试多少次都是同一结果 → 不值一次重试，直接进死信
+                throwFatal("unknown device_key: " + request.getDeviceKey());
             }
 
-            // 2. 批量入库：同一上报报文的多个属性拼成一条 multi-values INSERT（BUG-17 §3.2）
+            // 2. 脏报文（缺属性/空属性）同样不会自愈，属永久失败
+            if (request.getProperties() == null || request.getProperties().isEmpty()) {
+                throwFatal("empty properties: device_key=" + request.getDeviceKey());
+            }
+
+            // 3. 批量入库：同一上报报文的多个属性拼成一条 multi-values INSERT（BUG-17 §3.2）
             LocalDateTime ts = request.getTs() != null
                     ? LocalDateTime.ofInstant(Instant.ofEpochMilli(request.getTs()), ZoneId.of("Asia/Shanghai"))
                     : LocalDateTime.now();
@@ -79,7 +94,7 @@ public class TelemetryServiceImpl implements TelemetryService {
                 telemetryMapper.insertBatch(telemList);
             }
 
-            // 3. 时间窗聚合刷新在线状态：5s 窗口内每设备只写一次 device 表（BUG-17 §3.3），
+            // 4. 时间窗聚合刷新在线状态：5s 窗口内每设备只写一次 device 表（BUG-17 §3.3），
             //    跨 worker 用 Redis SETNX 原子协调，消除高并发 hot-row 锁竞争。
             Boolean first = redisTemplate.opsForValue()
                     .setIfAbsent("onl:" + deviceId, "1", ONLINE_FLUSH_WINDOW);
@@ -87,16 +102,23 @@ public class TelemetryServiceImpl implements TelemetryService {
                 refreshOnline(deviceId);
             }
             log.info("telemetry saved: device_key={}, props={}", request.getDeviceKey(), request.getProperties().size());
-            return true;
+        } catch (PermanentTelemetryException e) {
+            throw e; // 交给 @RetryableTopic 的 exclude → 跳过重试直达 DLT
         } catch (Exception e) {
-            log.error("telemetry process failed: device_key={}", request.getDeviceKey(), e);
-            // 入库失败计数：供 Prometheus 告警 "入库失败率>1%"（B6）
-            meterRegistry.counter("iot_telemetry_process_failures_total",
-                    "result", "failed").increment();
-            return false;
+            // 瞬时失败（DB 连接断开 / 超时 / 死锁等）：标记为可重试，退避后重来
+            meterRegistry.counter("iot_telemetry_process_failures_total", "result", "retryable").increment();
+            log.error("telemetry process failed (retryable): device_key={}", request.getDeviceKey(), e);
+            throw new IllegalStateException("telemetry process failed: device_key=" + request.getDeviceKey(), e);
         } finally {
             sample.stop(telemetryProcessTimer);
         }
+    }
+
+    /** 记一次永久失败并抛出（不入重试阶梯）。计数供 Prometheus 观测（B6 告警已按 result 全量聚合，加标签不影响）。 */
+    private void throwFatal(String message) {
+        meterRegistry.counter("iot_telemetry_process_failures_total", "result", "permanent").increment();
+        log.warn("telemetry permanent failure: {}", message);
+        throw new PermanentTelemetryException(message);
     }
 
     /** 在线状态写入：条件更新 0→1 视为上线转换并写上线日志；已在线仅刷新 last_online_at */

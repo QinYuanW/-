@@ -37,9 +37,22 @@ spring:
     consumer:
       group-id: iot-telemetry-consumers
       auto-offset-reset: earliest   # 无 offset 时从最早开始消费（可靠性优先）
-      enable-auto-commit: false     # 手动 ack（KafkaConfig ackMode=MANUAL）
+      enable-auto-commit: false     # 关闭 Kafka 自动提交；offset 由容器托管提交（D2-2 起 AckMode.RECORD）
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      properties:
+        # D2-2 背压：必须保证 max.poll.records × 单条处理耗时 << max.poll.interval.ms，
+        # 否则处理慢会被踢出消费组 → rebalance 风暴（这才是"消费不过来"最真实的崩法）。
+        # 50 条 × 单条约 4ms ≈ 200ms，远低于 300s 上限，留足余量。
+        max.poll.records: 50
+        max.poll.interval.ms: 300000
+    listener:
+      ack-mode: record         # 与 KafkaConfig 的 RECORD 保持一致（供重试/DLT 容器工厂复用）
+    retry:
+      topic:
+        # D2-2：@RetryableTopic 自动装配开关。Boot 3.2 默认即 true，显式声明防止默认值变更导致
+        # 注解被静默忽略（那会让失败消息退回"只记日志不重试"的旧行为）。
+        enabled: true
 
 # MyBatis-Plus 配置
 mybatis-plus:
