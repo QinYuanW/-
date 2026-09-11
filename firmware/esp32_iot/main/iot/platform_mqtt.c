@@ -31,7 +31,9 @@ static void build_up_ack_topic(char* buf, size_t len)
 
 /**
  * 处理平台下发的指令（down/{device_key}/command）
- * 报文格式：{"request_id":"...","command_type":1,"payload":{"property_key":"switch","value":true}}
+ * 报文格式：{"request_id":"...","command_type":1,"payload":{"switch":true,"temperature":26}}
+ * 说明：payload 是「属性名 → 值」的扁平映射，下方遍历其所有子节点逐属性执行；
+ *      command_type 当前不参与分支判断（预留，1 = 属性设置）。
  */
 static void handle_command(const char* data)
 {
