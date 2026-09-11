@@ -20,8 +20,10 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -136,6 +138,18 @@ public class CommandServiceImpl implements CommandService {
                         .eq(Command::getStatus, ST_PENDING)
                         .orderByAsc(Command::getCreatedAt))
                 .stream().map(CommandVO::from).collect(Collectors.toList());
+    }
+
+    @Override
+    public Set<String> pendingPropertyKeys(Long deviceId) {
+        List<Command> pending = commandMapper.selectList(new LambdaQueryWrapper<Command>()
+                .eq(Command::getDeviceId, deviceId)
+                .eq(Command::getStatus, ST_PENDING));
+        Set<String> keys = new LinkedHashSet<>();
+        for (Command c : pending) {
+            keys.addAll(parsePayload(c.getPayload()).keySet());
+        }
+        return keys;
     }
 
     @Override

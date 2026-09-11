@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * E1 影子同步实现：设备上线 → ① 补发离线指令 ② 下发 desired/reported 差异。
@@ -31,11 +32,17 @@ public class ShadowSyncServiceImpl implements ShadowSyncService {
     @Override
     public void onDeviceOnline(Long deviceId, String deviceKey) {
         try {
-            // ① 补发离线期间挂起的指令（按创建顺序，受单轮上限与保质期约束）
+            // ① 先记下「待补发指令已覆盖的属性」——补发后这些指令会迁出 status=0，必须先取
+            Set<String> covered = commandService.pendingPropertyKeys(deviceId);
+
+            // ② 补发离线期间挂起的指令（按创建顺序，受单轮上限与保质期约束）
             int replayed = commandService.replayPending(deviceId, deviceKey);
 
-            // ② 对齐期望值：desired 与 reported 不一致的属性下发给设备
-            Map<String, Object> delta = shadowService.getDelta(deviceKey);
+            // ③ 对齐期望值：desired 与 reported 不一致、**且未被本次补发指令覆盖**的属性下发给设备。
+            //    剔除 covered 是关键 —— applyDesired 已经为目标值生成过指令（离线排队/在线直发），
+            //    不剔除的话上线瞬间会对同一属性重复下发（实测复现：同一 switch=true 连发两条）。
+            Map<String, Object> delta = new LinkedHashMap<>(shadowService.getDelta(deviceKey));
+            delta.keySet().removeAll(covered);
             if (!delta.isEmpty()) {
                 commandService.dispatch(deviceKey, propertySetCommand(delta));
                 log.info("shadow delta dispatched on online: device_key={}, delta={}", deviceKey, delta);

@@ -4,6 +4,7 @@ import com.iot.platform.dto.CommandRequest;
 import com.iot.platform.dto.CommandVO;
 
 import java.util.List;
+import java.util.Set;
 
 public interface CommandService {
     /**
@@ -40,4 +41,13 @@ public interface CommandService {
 
     /** E1：查询某设备的待下发指令（{@code status=0}），供控制台展示离线队列 */
     List<CommandVO> listPending(String deviceKey);
+
+    /**
+     * E1：返回某设备当前待下发指令（{@code status=0}）所覆盖的属性名集合。
+     *
+     * <p>用于设备上线时**避免对同一属性重复下发**：{@link #replayPending} 送出的指令
+     * 已经携带了期望值，影子对齐不应再把同样的属性推一遍。
+     * <p>注意：必须在 {@code replayPending} <b>之前</b>调用（补发会把这些指令迁出 status=0）。
+     */
+    Set<String> pendingPropertyKeys(Long deviceId);
 }
