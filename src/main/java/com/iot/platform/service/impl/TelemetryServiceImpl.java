@@ -42,8 +42,13 @@ public class TelemetryServiceImpl implements TelemetryService {
     private static final Duration ONLINE_FLUSH_WINDOW = Duration.ofSeconds(5);
 
     @Override
-    @Async("telemetryExecutor") // 异步处理遥测数据
+    @Async("telemetryExecutor") // 历史链路（EMQX→@Async 直推）兼容包装；D1 后由 Kafka 消费者调 processSync
     public void process(TelemetryRequest request) {
+        processSync(request);
+    }
+
+    @Override
+    public boolean processSync(TelemetryRequest request) {
         // 埋点：上报→入库 全链路耗时（B5）
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
@@ -52,7 +57,7 @@ public class TelemetryServiceImpl implements TelemetryService {
             Long deviceId = resolveDeviceId(request.getDeviceKey());
             if (deviceId == null) {
                 log.warn("unknown device_key: {}", request.getDeviceKey());
-                return;
+                return false;
             }
 
             // 2. 批量入库：同一上报报文的多个属性拼成一条 multi-values INSERT（BUG-17 §3.2）
@@ -82,11 +87,13 @@ public class TelemetryServiceImpl implements TelemetryService {
                 refreshOnline(deviceId);
             }
             log.info("telemetry saved: device_key={}, props={}", request.getDeviceKey(), request.getProperties().size());
+            return true;
         } catch (Exception e) {
             log.error("telemetry process failed: device_key={}", request.getDeviceKey(), e);
             // 入库失败计数：供 Prometheus 告警 "入库失败率>1%"（B6）
             meterRegistry.counter("iot_telemetry_process_failures_total",
                     "result", "failed").increment();
+            return false;
         } finally {
             sample.stop(telemetryProcessTimer);
         }

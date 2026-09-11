@@ -27,6 +27,20 @@ spring:
       port: 6379
       database: 0
 
+  # Kafka：D1 数据链路演进（宿主机 Java 客户端连 EXTERNAL listener localhost:9092）
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      acks: all                # 等待 broker 持久化确认（D1：确认下沉到 Kafka）
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    consumer:
+      group-id: iot-telemetry-consumers
+      auto-offset-reset: earliest   # 无 offset 时从最早开始消费（可靠性优先）
+      enable-auto-commit: false     # 手动 ack（KafkaConfig ackMode=MANUAL）
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
 # MyBatis-Plus 配置
 mybatis-plus:
   configuration:
