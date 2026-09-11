@@ -17,6 +17,22 @@
 - **验证**：`/actuator/health` 三组件(EMQX/db/redis)全 UP；遥测 `temperature=26.5` 入库；`iot_telemetry_process_duration_seconds_count=2`、`queue_pending` gauge 均正常。
 - **状态**：✅ 已解决
 
+### BUG-17：C 压测揭示遥测写入吞吐平台 ~100 msg/s + 队列溢出数据静默丢弃
+
+- **现象**：输入速率 50→432→825 msg/s 三档踩压，稳态消化钉死在 ~98-100 msg/s（≈300 行/s）；交付率从 100% 崩塌到 30%；T2 发布 39965 条仅 14552 条落库（36%）、T3 发布 51687 条仅 15274 条落库（30%）。
+- **场景**：V2-C 分档压测（100/500/1000 台 flood 设备，`test_storm_telemetry_v2.py` 连接池模式）。
+- **排查根因**（自高到低）：
+  1. `mybatis-plus.log-impl=StdOutImpl` —— 每条 SQL 打控制台，worker 串行控制台 I/O 严重拖慢单条处理（首要因素）。
+  2. 单行 INSERT，每条消息 3 属性 = 3 次独立 INSERT，无 batch（`TelemetryServiceImpl.process()`）。
+  3. 每条消息都 `UPDATE device SET last_online_at`，且连接池归并到 ~200 池首设备 → device hot-row 行锁竞争。
+  4. 异步池 core=4/max=8 + 队列 5000 + 默认 `AbortPolicy`，溢出即丢弃。
+  5. **观测缺口**：`iot_telemetry_process_failures_total` 在 `process()` 体内(出队后)自增；栅栏丢弃发生在入队前，不进入 process()，故大量丢弃时该计数仍为 0 → B6 告警"入库失败率"在此场景失效。
+  - 平台约束：Windows select() 单次 ~64 socket，≥500 台被迫用连接池(200 连接承载 1000 身份)，数据归并 + hot row。
+- **状态**：✅ 已定位，第 2 轮已部分修复（观测缺口封堵 + 吞吐提升），详见《docs/05_压测报告/MySQL时序瓶颈分析报告.md》附。
+  - **第 2 轮落地**：去控制台 SQL 日志(NoLoggingImpl) / multi-values 批量 INSERT / Redis 5s 时间窗聚合 device 更新 / AbortPolicy→计数静默丢弃(新增 `iot_telemetry_rejected_total`)。
+  - **重测**：稳态平台 ~98 → **~248 msg/s（2.5×）**；低于平台零丢弃；T4 重档 27694 条丢弃从静默变可观测。
+  - **遗留**：裸 MySQL 批量插入极限未锁定（下一层）。
+
 ## 2026-09-05
 
 ### BUG-5：控制台登录密码校验失败（BCrypt 哈希被截断）

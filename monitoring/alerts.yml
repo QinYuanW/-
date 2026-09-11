@@ -2,15 +2,15 @@
 groups:
   - name: iot-platform-alerts
     rules:
-      # 遥测异步线程池队列水位 >80%（容量 5000 → 4000）持续 2 分钟
+      # 遥测异步线程池队列水位 >80%（容量 20000 → 16000）持续 2 分钟
       - alert: IotTelemetryQueueHigh
-        expr: iot_telemetry_queue_pending > 4000
+        expr: iot_telemetry_queue_pending > 16000
         for: 2m
         labels:
           severity: warning
         annotations:
           summary: "遥测线程池队列占用高"
-          description: "遥测异步线程池待处理队列水位 {{ $value }} > 4000（容量 80%），上游 or 入库可能成为瓶颈。"
+          description: "遥测异步线程池待处理队列水位 {{ $value }} > 16000（容量 80%），上游 or 入库可能成为瓶颈。"
 
       # 接口 5xx 失败率 >1% 持续 2 分钟（覆盖入库失败等后端异常）
       - alert: IotApiErrorRateHigh
