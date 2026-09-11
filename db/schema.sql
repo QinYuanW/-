@@ -92,8 +92,14 @@ CREATE TABLE `device_telemetry` (
   `ts`           DATETIME(3)     NOT NULL                COMMENT '上报时间（设备侧时间）',
   PRIMARY KEY (`id`, `ts`),
   KEY `idx_device_ts` (`device_id`, `ts`),
-  -- D2 幂等去重：同一设备同一属性同一 ts 视为同一条上报，唯一约束拦截 offset 重放 / webhook 重发的重复行
-  UNIQUE KEY `uk_device_prop_ts` (`device_id`, `property_key`, `ts`)
+  -- D2 幂等去重（BUG-20 修正）：唯一键=设备+属性+值+ts（value 必须入键，见下）。
+  --   · BUG-20：仅旧键 (device_id,property_key,ts) 时，QoS0 突发多报文共享同一毫秒 EMQX 时间戳 ts，
+  --     不同上报被唯一键误判为"同一上报"折叠，ON DUPLICATE 静默丢 ~90% 数据。
+  --   · 加入 value 后：并发不同上报 value 不同→不误删；真正的 offset 重放/webhook 重发 value+ts 全同→仍正确去重。
+  UNIQUE KEY `uk_device_prop_val_ts` (`device_id`, `property_key`, `value`, `ts`),
+  -- 查询索引（补回）：唯一键含 value（为幂等去重），value 插在中间，无法直接支撑
+  -- (device_id, property_key)+ts 范围查询的索引级裁剪；补普通索引专供「按属性查区间/取最新」。
+  KEY `idx_device_prop_ts` (`device_id`, `property_key`, `ts`)
 ) ENGINE=InnoDB COMMENT='设备遥测表：物模型属性时序数据，按月分区'
 PARTITION BY RANGE COLUMNS (`ts`) (
   PARTITION p202608 VALUES LESS THAN ('2026-09-01'),

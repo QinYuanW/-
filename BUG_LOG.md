@@ -13,7 +13,7 @@
   2. **入口边界丢消息**：EMQX webhook action `fwd_telemetry` metrics：`matched=21802 / success=10314 / dropped=10798`，其中 `dropped.expired=10798`（**全部因 `request_ttl=45s` 过期**）。即 20000 条突发中，仅 ~11011 条在宕机窗口内成功 POST 到后端（含 EMQX webhook at-least-once 重发产生的重复记录 → Kafka 11011 记录去重后 distinct seq=9202）；其余 ~10800 条在 EMQX 侧排队等待时 `request_ttl` 过期被丢弃，**从未进入 Kafka**。
 - **结论**：D1 把耐久性下沉到 Kafka 后，**后端重启不再丢已在 Kafka 中的消息**（核心目标达成）；但 **EMQX→后端 webhook 仍是尽力而为 HTTP，后端宕机超 `request_ttl`（45s) 时突发积压消息会被过期丢弃**，这是此前 Webhook 可靠性分析中"EMQX 缓冲 45s TTL"边界的具体化。
 - **修复方向（待评估）**：① 调大 EMQX webhook `request_ttl` / `max_buffer_bytes`（缓解但治标）；② 后端 `/api/v1/telemetry` 改为异步 `send()`（不阻塞 `.get`），webhook 快速返回、避免 EMQX 积压，耐久性交给 Kafka（治本，需再验 crash 时生产者在途缓冲）；③ 入库幂等以吸收 webhook 重发的重复记录（对应 D2）。
-- **状态**：📌 已定位并量化；Kafka 段已闭环（offset 续消费验证通过），webhook 入口边界待 D1 收尾或 D2 处理。
+- **状态**：✅ 已处理（异步发送治本后端在线段 + 澄清残余边界）。异步验证：后端在线 + QoS0 突发 5000 条，EMQX `fwd_telemetry` `matched +5000 / success +5000 / failed.unknown 无新增 / discarded=0`，webhook 请求毫秒级返回、不再在 EMQX 侧积压触发 `request_ttl` 过期。⚠️ **残余边界**：异步只消除"后端在、但处理慢→EMQX 积压"段；后端整体宕机 >45s 期间，EMQX webhook HTTP 直达后端、目标不可达，突发在途消息仍会在 EMQX 侧过期丢弃（本次验证进度中**发现这一残余与 BUG-20 叠加**，见 BUG-20；真正闭环需将入口改为持久化缓冲，如 EMQX 直连 Redis/DB 桥，属后续架构项）。
 
 ### BUG-19：D2 消费端幂等去重——at-least-once 重放导致数千条遥测重复落库
 
@@ -26,6 +26,24 @@
   3. **改写入**：`DeviceTelemetryMapper.insertBatch` 追加 `ON DUPLICATE KEY UPDATE id = id`（冲突时无实际变更 → 吞掉重复、不报错、不中断批量、保留首行）。
 - **验证**：同一遥测 JSON（固定 ts）向 Kafka 投递 3 次 → DB 仅落 3 行（每属性 1 份），重复被吞、无 DuplicateKeyException、正常新数据不受影响 ✅
 - **状态**：✅ 幂等去重完成（D2 前半）；背压「消费不过来时不丢消息」待 D2-2 后续处理。
+
+### BUG-20：D2 幂等唯一键 `(device_id,property_key,ts)` 误折叠并发上报——QoS0 突发 ~90% 数据被静默去重吞掉
+
+- **现象**：BUG-18 异步发送验证时，后端在线 + QoS0 突发 5000 条，EMQX webhook 全部成功（matched/success +0 失败）、Kafka 落满 5000（LOG-END-OFFSET 增量吻合）、消费者 LAG=0 且无任何异常日志，但 DB 仅落 544 个 distinct seq（丢失 ~90%）。极小复现：4 条不同 seq（70000-70003）仅 70000 落库。
+- **排查根因**（`Com_insert` 增量 +301 ≈300 insertBatch、`Innodb_rows_inserted` 仅 +103）：
+  1. `device_telemetry` 幂等唯一键 `uk_device_prop_ts (device_id, property_key, ts)` 把 `ts`（webhook 携带的 **EMQX 消息时间戳**，规则 `timestamp AS ts`）纳入去重身份。
+  2. QoS0 同 TCP 突发时，多报文在同一毫秒到达 EMQX（Windows 定时器 ~15.6ms 节拍）→ 这些报文共享**完全相同**的 `ts`。
+  3. 不同上报 `(device_id, 'seq', ts)` 键完全相同 → `INSERT ... ON DUPLICATE KEY UPDATE id=id` 把这些**本当不同的上报**误判为"同一上报"，整条消息 3 属性全部命中重复 → 0 影响行、不报错、静默丢弃，仅保留该 ts 第一条。
+  4. D1 用 QoS1（PUBACK 往返拉开时间戳）侥幸未大规模触发；D1 崩溃测试用了 QoS0 亦受影响。
+- **修复**：唯一键加入 `value` → `uk_device_prop_val_ts (device_id, property_key, value, ts)`（`ts` 仍在键内，兼容按月分区约束"唯一键须含分区列"）。
+  - 并发不同上报：value（如 seq/temperature）不同 → 键不同 → 全部正常落库 ✅
+  - 真正重放：同一条 Kafka 消息 offset 重放 / webhook 同内容重发，value+ts 完全相同 → 仍被唯一键正确去重 ✅
+  - 仅改 schema 索引 + `db/schema.sql`，`ON DUPLICATE` 与 Java 代码无需改动。
+- **验证**：
+  1. 4 条同毫秒突发（70010-70013）→ 4 条全落库（修复前仅 1 条）✅
+  2. QoS0 突发 5000 条（seq 80000-84999）→ **distinct=5000 全落库、零丢失** ✅
+  3. 二次发布同批 3 条（90000-90002）→ 因 EMQX 时间戳不同按"新数据"落 6 行/3 distinct（重发布时间戳理应新落），真重放仍由键去重 ✅
+- **状态**：✅ 已修复（D2 幂等语义修正）；`db/schema.sql` 与 `BUG_LOG` 已同步。运行库已 ALTER，当前后端 jar 无需重建。
 
 ## 2026-09-10
 
