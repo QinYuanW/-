@@ -1,0 +1,74 @@
+
+CREATE TABLE IF NOT EXISTS device (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  device_key VARCHAR(64) NOT NULL,
+  product_key VARCHAR(32) NOT NULL,
+  device_name VARCHAR(64) NOT NULL,
+  device_secret VARCHAR(64) NOT NULL,
+  project_id BIGINT UNSIGNED NULL,
+  online_status TINYINT NOT NULL DEFAULT 0,
+  last_online_at DATETIME(3) NULL,
+  last_offline_at DATETIME(3) NULL,
+  last_ip VARCHAR(45) NULL,
+  group_id BIGINT UNSIGNED NULL,
+  tags VARCHAR(255) NULL,
+  status TINYINT NOT NULL DEFAULT 1,
+  deleted TINYINT NOT NULL DEFAULT 0,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_device_key (device_key),
+  UNIQUE KEY uk_product_name (product_key, device_name),
+  KEY idx_project (project_id),
+  KEY idx_online (online_status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS device_log (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  device_id BIGINT UNSIGNED NOT NULL,
+  log_type TINYINT NOT NULL,
+  content VARCHAR(1024) NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  KEY idx_device_time (device_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS command (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  device_id BIGINT UNSIGNED NOT NULL,
+  command_type TINYINT NOT NULL,
+  payload JSON NOT NULL,
+  status TINYINT NOT NULL DEFAULT 0,
+  request_id VARCHAR(64) NOT NULL,
+  sent_at DATETIME(3) NULL,
+  ack_at DATETIME(3) NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_request_id (request_id),
+  KEY idx_device_status_time (device_id, status, created_at),
+  KEY idx_status_sent (status, sent_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS project (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  name VARCHAR(64) NOT NULL,
+  description VARCHAR(255) NULL,
+  deleted TINYINT NOT NULL DEFAULT 0,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS user (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  username VARCHAR(64) NOT NULL,
+  password_hash VARCHAR(100) NOT NULL,
+  role TINYINT NOT NULL DEFAULT 2,
+  status TINYINT NOT NULL DEFAULT 1,
+  deleted TINYINT NOT NULL DEFAULT 0,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_username (username)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

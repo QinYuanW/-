@@ -23,3 +23,5 @@ Thumbs.db
 *.pem
 .env
 credentials*
+# db 运行时产物
+/db/_runtime/

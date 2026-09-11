@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>物联网 PaaS 控制台 · 线框图</title>
+<style>
+  :root {
+    --border: #9aa4b2;
+    --border-light: #c3cbd6;
+    --bg: #f4f6f9;
+    --panel: #ffffff;
+    --text: #2b3440;
+    --muted: #7a8694;
+    --accent: #3b82f6;
+    --accent-bg: #e8f0fe;
+    --warn: #d97706;
+    --ok: #16a34a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+  }
+  .page-header {
+    max-width: 1200px;
+    margin: 0 auto 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .page-header h1 { font-size: 20px; font-weight: 600; }
+  .page-header .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .nav-tabs { display: flex; gap: 8px; }
+  .nav-tabs button {
+    padding: 8px 18px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: #fff;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  .nav-tabs button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .stage { max-width: 1200px; margin: 0 auto; }
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* wireframe panel */
+  .panel {
+    background: var(--panel);
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    position: relative;
+  }
+  .panel .tag {
+    position: absolute;
+    top: -11px;
+    right: 12px;
+    background: #fff;
+    border: 1px solid var(--border-light);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    color: var(--muted);
+    font-family: Consolas, monospace;
+  }
+  .panel-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+  .note {
+    background: #fff8e6;
+    border: 1px dashed var(--warn);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 12px;
+    color: #92400e;
+    margin-bottom: 14px;
+  }
+  .note b { color: var(--warn); }
+
+  /* login */
+  .login-wrap { display: flex; justify-content: center; padding-top: 60px; }
+  .login-box { width: 380px; }
+  .login-logo {
+    text-align: center;
+    margin-bottom: 24px;
+  }
+  .login-logo .logo-box {
+    width: 56px; height: 56px;
+    margin: 0 auto 10px;
+    border: 2px solid var(--accent);
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; color: var(--accent); font-weight: 700;
+  }
+  .login-logo h2 { font-size: 18px; }
+  .login-logo p { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .field input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1.5px solid var(--border);
+    border-radius: 6px;
+    font-size: 14px;
+    background: #fbfcfe;
+  }
+  .btn {
+    width: 100%;
+    padding: 11px;
+    border: none;
+    border-radius: 6px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .btn:disabled { background: #b6c6dd; cursor: not-allowed; }
+
+  /* layout */
+  .layout { display: grid; grid-template-columns: 300px 1fr; gap: 16px; }
+  .dev-list { max-height: 560px; overflow-y: auto; }
+  .dev-item {
+    border: 1.5px solid var(--border-light);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    background: #fff;
+  }
+  .dev-item.selected { border-color: var(--accent); background: var(--accent-bg); }
+  .dev-item .name { font-size: 14px; font-weight: 600; }
+  .dev-item .meta { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  .dot.on { background: var(--ok); }
+  .dot.off { background: #cbd5e1; }
+
+  .main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .card-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+  .metric {
+    border: 1.5px solid var(--border-light);
+    border-radius: 6px;
+    padding: 12px;
+    text-align: center;
+    background: #fbfcfe;
+  }
+  .metric .label { font-size: 12px; color: var(--muted); }
+  .metric .value { font-size: 22px; font-weight: 700; margin-top: 4px; }
+  .metric .unit { font-size: 12px; color: var(--muted); }
+  .metric .src { font-size: 10px; color: #b0b8c4; margin-top: 4px; }
+
+  /* chart placeholder */
+  .chart-ph {
+    height: 180px;
+    border: 1.5px dashed var(--border-light);
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--muted);
+    font-size: 13px;
+    background: repeating-linear-gradient(0deg, #fafbfc 0 24px, #f2f4f7 24px 25px);
+  }
+  .chart-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+  .chart-tabs button {
+    padding: 4px 12px;
+    border: 1px solid var(--border-light);
+    border-radius: 4px;
+    background: #fff;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .chart-tabs button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  /* control */
+  .ctrl-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px dashed var(--border-light); }
+  .ctrl-row:last-child { border-bottom: none; }
+  .ctrl-row .lbl { font-size: 13px; }
+  .ctrl-row .lbl small { display: block; color: var(--muted); font-size: 11px; }
+  .switch { width: 46px; height: 24px; border-radius: 12px; background: #cbd5e1; position: relative; cursor: pointer; }
+  .switch.on { background: var(--accent); }
+  .switch::after {
+    content: ""; position: absolute; top: 2px; left: 2px;
+    width: 20px; height: 20px; border-radius: 50%; background: #fff;
+    transition: left .15s;
+  }
+  .switch.on::after { left: 24px; }
+  .slider { width: 140px; }
+  .cmd-status {
+    margin-top: 12px;
+    border: 1px dashed var(--border-light);
+    border-radius: 6px;
+    padding: 10px;
+    font-size: 12px;
+    color: var(--muted);
+    background: #fbfcfe;
+  }
+  .cmd-status .flow { font-family: Consolas, monospace; font-size: 11px; margin-top: 6px; color: var(--text); }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; }
+  .badge.pending { background: #fef3c7; color: #92400e; }
+  .badge.sent { background: #dbeafe; color: #1e40af; }
+  .badge.done { background: #dcfce7; color: #166534; }
+  .badge.timeout { background: #fee2e2; color: #991b1b; }
+
+  .footer-note {
+    max-width: 1200px; margin: 20px auto 0;
+    font-size: 12px; color: var(--muted);
+    border-top: 1px dashed var(--border-light);
+    padding-top: 12px;
+  }
+  .footer-note code { background: #eef1f5; padding: 1px 5px; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <div>
+    <h1>物联网 PaaS 控制台 · 线框图</h1>
+    <div class="sub">MVP 前端原型（v0.1）· 页面 1 登录 / 页面 2 设备数据 + 下发 · 灰框为线框示意</div>
+  </div>
+  <div class="nav-tabs">
+    <button class="active" data-page="login">① 登录页</button>
+    <button data-page="main">② 设备数据页</button>
+  </div>
+</div>
+
+<div class="stage">
+
+<!-- ============ 页面 1：登录 ============ -->
+<div class="page active" id="page-login">
+  <div class="login-wrap">
+    <div class="panel login-box">
+      <span class="tag">POST /api/v1/login（待后端实现）</span>
+      <div class="login-logo">
+        <div class="logo-box">IoT</div>
+        <h2>物联网 PaaS 控制台</h2>
+        <p>设备管理 · 数据监控 · 远程控制</p>
+      </div>
+      <div class="note">
+        <b>缺口标注：</b>后端暂无登录接口。需新增 <code>POST /api/v1/login</code>（username + password → JWT Token），
+        前端后续所有请求带 <code>Authorization: Bearer &lt;token&gt;</code>。MVP 阶段可先用固定账号联调。
+      </div>
+      <div class="field">
+        <label>用户名</label>
+        <input type="text" placeholder="请输入用户名" value="admin">
+      </div>
+      <div class="field">
+        <label>密码</label>
+        <input type="password" placeholder="请输入密码" value="••••••••">
+      </div>
+      <button class="btn">登 录</button>
+      <div class="note" style="margin-top:14px;margin-bottom:0;">
+        登录成功 → 跳转「设备数据页」；失败提示「用户名或密码错误」（code 4010）
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 页面 2：设备数据 ============ -->
+<div class="page" id="page-main">
+  <div class="layout">
+
+    <!-- 左：设备列表 -->
+    <div class="panel dev-list">
+      <span class="tag">GET /api/v1/devices</span>
+      <div class="panel-title">设备列表</div>
+      <div class="dev-item selected">
+        <div class="name"><span class="dot on"></span>客厅温湿度计</div>
+        <div class="meta">dev_demo_001 · 在线 · 最后在线 23:11:21</div>
+      </div>
+      <div class="dev-item">
+        <div class="name"><span class="dot off"></span>卧室传感器</div>
+        <div class="meta">dev_demo_002 · 离线 · 最后在线 08:00:00</div>
+      </div>
+      <div class="dev-item">
+        <div class="name"><span class="dot off"></span>厨房温控器</div>
+        <div class="meta">dev_demo_003 · 离线 · 从未上线</div>
+      </div>
+      <div class="note" style="margin-top:12px;margin-bottom:0;">
+        点击设备 → 右侧加载该设备最新数据 + 下发控制
+      </div>
+    </div>
+
+    <!-- 右：主区 -->
+    <div>
+      <!-- 物模型说明 -->
+      <div class="panel" style="margin-bottom:16px;">
+        <span class="tag">GET /devices/{key}/tsl（待后端实现）</span>
+        <div class="panel-title">物模型驱动 · 界面按 TSL 自动生成</div>
+        <div class="note" style="margin-bottom:0;">
+          <b>核心设计：</b>前端不写死「温湿度/开关/亮度」，而是拉取设备所属产品的物模型（<code>product.tsl</code>），
+          按规则<b>自动生成</b>数据卡片、控制控件、服务按钮。用户新增传感器/控制项 → 只需在产品里改 TSL，前端零改动。
+        </div>
+        <div style="font-size:12px;margin-top:10px;color:var(--muted);">
+          <b>渲染规则：</b>
+          <code>properties[access=readonly]</code> → 数据卡片 ｜
+          <code>properties[access=readwrite]</code> → 数据卡片 + 控制控件 ｜
+          <code>services</code> → 服务调用按钮 ｜
+          <code>events</code> → 事件展示（MVP 后置）
+        </div>
+      </div>
+
+      <!-- 最新遥测 -->
+      <div class="panel" style="margin-bottom:16px;">
+        <span class="tag">GET /devices/{key}/telemetry/latest + TSL</span>
+        <div class="panel-title">客厅温湿度计 · 最新数据 <span style="color:var(--ok);font-size:12px;font-weight:400;">● 在线</span></div>
+        <div class="card-grid">
+          <div class="metric">
+            <div class="label">温度</div>
+            <div class="value">26.7<span class="unit"> ℃</span></div>
+            <div class="src">TSL: temperature · float · readonly</div>
+          </div>
+          <div class="metric">
+            <div class="label">湿度</div>
+            <div class="value">51.6<span class="unit"> %</span></div>
+            <div class="src">TSL: humidity · float · readonly</div>
+          </div>
+          <div class="metric">
+            <div class="label">开关</div>
+            <div class="value">开<span class="unit"></span></div>
+            <div class="src">TSL: switch · bool · readwrite</div>
+          </div>
+          <div class="metric">
+            <div class="label">亮度</div>
+            <div class="value">50<span class="unit"> %</span></div>
+            <div class="src">TSL: brightness · int · readwrite</div>
+          </div>
+        </div>
+        <div class="note" style="margin-bottom:0;">
+          卡片由 TSL 的 <code>properties</code> 自动生成（含名称/单位/类型）。新增传感器（如 PM2.5、CO₂）→
+          产品 TSL 加一条 property → 卡片自动出现，<b>前端无需改代码</b>。数据每 5s 轮询刷新
+        </div>
+      </div>
+
+      <div class="main-grid">
+        <!-- 历史曲线 -->
+        <div class="panel">
+          <span class="tag">GET /devices/{key}/telemetry?property=...</span>
+          <div class="panel-title">历史曲线</div>
+          <div class="chart-tabs">
+            <button class="active">温度</button>
+            <button>湿度</button>
+            <button>亮度</button>
+          </div>
+          <div class="chart-ph">📈 折线图占位（ECharts）· 横轴时间 / 纵轴数值</div>
+          <div class="note" style="margin-top:12px;margin-bottom:0;">
+            时间范围：最近 1 小时（可切换 1h / 6h / 24h）
+          </div>
+        </div>
+
+        <!-- 下发控制 -->
+        <div class="panel">
+          <span class="tag">POST /devices/{key}/commands + TSL</span>
+          <div class="panel-title">下发控制（按 TSL 动态生成）</div>
+          <div class="ctrl-row">
+            <div class="lbl">开关<small>TSL: switch · bool · readwrite → 开关控件</small></div>
+            <div class="switch on"></div>
+          </div>
+          <div class="ctrl-row">
+            <div class="lbl">亮度<small>TSL: brightness · int · readwrite → 滑块控件</small></div>
+            <input type="range" class="slider" min="0" max="100" value="50">
+          </div>
+          <button class="btn" style="margin-top:14px;">下发指令</button>
+          <div class="note" style="margin-top:12px;margin-bottom:0;">
+            <b>控件映射规则：</b>TSL 中 <code>access=readwrite</code> 的属性按类型生成控件 ——
+            <code>bool</code> → 开关 ｜ <code>int/float</code> → 滑块 ｜ <code>string</code> → 输入框。
+            用户新增可写属性（如「模式选择」）→ TSL 加一条 → 控件自动出现
+          </div>
+          <div class="cmd-status">
+            <b>指令状态（轮询 GET /api/v1/commands/{request_id}）</b>
+            <div class="flow">
+              <span class="badge done">2 已执行</span> · request_id: b8f4c2e1-9a3d-4f5e-8c7d-6a5b4c3d2e1f<br>
+              0 待下发 → 1 已下发 → <b>2 已执行</b> / 3 失败 / 4 超时
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<div class="footer-note">
+  线框图 v0.1 · 对应任务⑪ · 接口字段与 <code>docs/02_设计契约/API契约.md</code> 对齐 ·
+  登录接口待后端补 <code>POST /api/v1/login</code>（JWT）· 确认布局后基于此开发 Vue3 + Element Plus 正式版
+</div>
+
+<script>
+  document.querySelectorAll('.nav-tabs button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.nav-tabs button').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('page-' + btn.dataset.page).classList.add('active');
+    });
+  });
+</script>
+</body>
+</html>

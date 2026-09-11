@@ -1,0 +1,2 @@
+CREATE TABLE IF NOT EXISTS iot_platform.t3 (id INT PRIMARY KEY);
+SHOW TABLES FROM iot_platform;
