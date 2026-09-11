@@ -20,12 +20,14 @@ public interface DeviceTelemetryMapper extends BaseMapper<DeviceTelemetry> {
     List<Map<String, String>> selectLatestByDevice(Long deviceId);
 
     /**
-     * 批量插入：一条 multi-values INSERT 代替逐条，显著降低写路径往返次数（BUG-17 §3.2）。
+     * 批量幂等插入：一条 multi-values INSERT 代替逐条，显著降低写路径往返次数（BUG-17 §3.2）。
+     * D2 幂等去重：同一设备同一属性同一 ts 视为同一条上报（uk_device_prop_ts），
+     * 冲突更新 id=id（无实际变更）吞掉 offset 重放 / webhook 重发产生的重复，不落脏数据、不中断批量。
      * 调用方保证 list 内 ts 相同（同一设备的同一上报报文），避免跨分区。
      */
     @Insert("<script>INSERT INTO device_telemetry (device_id, property_key, value, value_type, ts) VALUES " +
             "<foreach collection='list' item='t' separator=','>" +
             "(#{t.deviceId}, #{t.propertyKey}, #{t.value}, #{t.valueType}, #{t.ts})" +
-            "</foreach></script>")
+            "</foreach> ON DUPLICATE KEY UPDATE id = id</script>")
     int insertBatch(@Param("list") List<DeviceTelemetry> list);
 }
