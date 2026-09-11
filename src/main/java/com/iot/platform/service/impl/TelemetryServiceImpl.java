@@ -12,6 +12,8 @@ import com.iot.platform.entity.DeviceTelemetry;
 import com.iot.platform.mapper.DeviceLogMapper;
 import com.iot.platform.mapper.DeviceMapper;
 import com.iot.platform.mapper.DeviceTelemetryMapper;
+import com.iot.platform.service.ShadowService;
+import com.iot.platform.service.ShadowSyncService;
 import com.iot.platform.service.TelemetryService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -38,6 +40,10 @@ public class TelemetryServiceImpl implements TelemetryService {
     private final StringRedisTemplate redisTemplate;
     private final MeterRegistry meterRegistry;
     private final Timer telemetryProcessTimer;
+    /** E1 设备影子：上报值(reported) 落库 */
+    private final ShadowService shadowService;
+    /** E1 设备影子：上线时补发离线指令 + 对齐期望值 */
+    private final ShadowSyncService shadowSyncService;
 
     /** 设备在线状态聚合刷新窗口：窗口内每设备只写一次 device 表，缓和高并发 hot-row 锁竞争（BUG-17 §3.3） */
     private static final Duration ONLINE_FLUSH_WINDOW = Duration.ofSeconds(5);
@@ -94,12 +100,23 @@ public class TelemetryServiceImpl implements TelemetryService {
                 telemetryMapper.insertBatch(telemList);
             }
 
-            // 4. 时间窗聚合刷新在线状态：5s 窗口内每设备只写一次 device 表（BUG-17 §3.3），
+            // 4. E1 影子：旁路更新上报值（reported）。
+            //    纪律同 D2-2 —— 失败只计数、**绝不上抛**：影子是增强能力，
+            //    不能因它把遥测打进 @RetryableTopic 重试阶梯甚至 DLT。
+            try {
+                shadowService.updateReported(request.getDeviceKey(), request.getProperties());
+            } catch (Exception e) {
+                meterRegistry.counter("iot_telemetry_shadow_failures_total").increment();
+                log.warn("shadow reported update failed (ignored): device_key={}, err={}",
+                        request.getDeviceKey(), e.getMessage());
+            }
+
+            // 5. 时间窗聚合刷新在线状态：5s 窗口内每设备只写一次 device 表（BUG-17 §3.3），
             //    跨 worker 用 Redis SETNX 原子协调，消除高并发 hot-row 锁竞争。
             Boolean first = redisTemplate.opsForValue()
                     .setIfAbsent("onl:" + deviceId, "1", ONLINE_FLUSH_WINDOW);
             if (Boolean.TRUE.equals(first)) {
-                refreshOnline(deviceId);
+                refreshOnline(deviceId, request.getDeviceKey());
             }
             log.info("telemetry saved: device_key={}, props={}", request.getDeviceKey(), request.getProperties().size());
         } catch (PermanentTelemetryException e) {
@@ -122,7 +139,7 @@ public class TelemetryServiceImpl implements TelemetryService {
     }
 
     /** 在线状态写入：条件更新 0→1 视为上线转换并写上线日志；已在线仅刷新 last_online_at */
-    private void refreshOnline(Long deviceId) {
+    private void refreshOnline(Long deviceId, String deviceKey) {
         LocalDateTime now = LocalDateTime.now();
         int transitioned = deviceMapper.update(null, new LambdaUpdateWrapper<Device>()
                 .set(Device::getOnlineStatus, 1)
@@ -136,6 +153,10 @@ public class TelemetryServiceImpl implements TelemetryService {
             logEntry.setContent("设备上线（收到上报）");
             logEntry.setCreatedAt(now);
             deviceLogMapper.insert(logEntry);
+
+            // E1：0→1 是天然的「设备上线」事件钩子 —— 触发影子同步
+            //（补发离线指令 + 对齐期望值）。内部已吞异常，不会影响本线程的遥测处理。
+            shadowSyncService.onDeviceOnline(deviceId, deviceKey);
         } else {
             deviceMapper.update(null, new LambdaUpdateWrapper<Device>()
                     .set(Device::getLastOnlineAt, now)
