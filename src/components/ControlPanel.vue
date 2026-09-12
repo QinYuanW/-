@@ -102,8 +102,25 @@ const STATUS_MAP = {
   4: { text: '超时', cls: 'timeout' }
 }
 
-const statusText = computed(() => (lastCommand.value ? STATUS_MAP[lastCommand.value.status]?.text || '未知' : ''))
+const statusText = computed(() => {
+  if (!lastCommand.value) return ''
+  const s = lastCommand.value.status
+  // E1：0 不再是"一闪而过"，而是设备离线时的常态挂起——把原因讲出来
+  if (s === 0) return '待下发 · 设备离线挂起'
+  return STATUS_MAP[s]?.text || '未知'
+})
 const statusClass = computed(() => (lastCommand.value ? STATUS_MAP[lastCommand.value.status]?.cls || '' : ''))
+
+/** E1 后 dispatch 可能返回 0（设备离线挂起）——提示语必须按真实状态给，不能一律喊"已下发" */
+function dispatchToast(name, status) {
+  if (status === 0) {
+    ElMessage.warning(`设备离线，「${name}」已挂起，上线后自动补发`)
+  } else if (status === 1) {
+    ElMessage.success(`已下发「${name}」`)
+  } else {
+    ElMessage.error(`「${name}」下发失败`)
+  }
+}
 
 function boolValue(key) {
   const v = optimistic.value[key] ?? props.telemetry[key]
@@ -129,7 +146,7 @@ async function sendProperty(prop, value) {
   try {
     const res = await dispatchCommand(props.deviceKey, 1, { [prop.key]: value })
     lastCommand.value = res.data
-    ElMessage.success(`已下发「${prop.name}」`)
+    dispatchToast(prop.name, res.data.status)
     startPolling(res.data.request_id, prop.key, value)
   } catch (e) {
     delete optimistic.value[prop.key]
@@ -143,7 +160,7 @@ async function callService(svc) {
   try {
     const res = await dispatchCommand(props.deviceKey, 2, { service_key: svc.key })
     lastCommand.value = res.data
-    ElMessage.success(`已调用服务「${svc.name}」`)
+    dispatchToast(`服务 ${svc.name}`, res.data.status)
     startPolling(res.data.request_id)
   } catch (e) {
     // 拦截器已提示
