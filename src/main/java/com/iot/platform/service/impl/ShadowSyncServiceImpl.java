@@ -93,6 +93,8 @@ public class ShadowSyncServiceImpl implements ShadowSyncService {
         CommandRequest request = new CommandRequest();
         request.setCommandType(CMD_TYPE_PROPERTY_SET);
         request.setPayload(properties);
+        // 期望状态语义：离线挂起、上线补发（与命令语义相反，见 CommandServiceImpl.dispatch 注释）
+        request.setQueueIfOffline(true);
         return request;
     }
 }

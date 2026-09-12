@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iot.platform.client.EmqxClient;
+import com.iot.platform.common.BizException;
+import com.iot.platform.common.ErrorCode;
 import com.iot.platform.dto.CommandRequest;
 import com.iot.platform.dto.CommandVO;
 import com.iot.platform.entity.Command;
@@ -56,6 +58,15 @@ public class CommandServiceImpl implements CommandService {
             throw new IllegalArgumentException("device not found");
         }
 
+        // 0. E1 语义分家（2026-09-12 汤园决策）：命令 ≠ 期望状态
+        //    · 命令语义（缺省）：瞬时动作，设备离线 → 直接失败。过期的上下文不该被延迟执行
+        //      （想象离线期间下达的"关阀"在设备上线后被突然执行）。
+        //    · 期望状态语义（queue_if_offline=true，仅影子期望值路径）：离线挂起，上线补发。
+        if (!isOnline(device) && !Boolean.TRUE.equals(request.getQueueIfOffline())) {
+            throw new BizException(ErrorCode.DEVICE_OFFLINE,
+                    "设备不在线，指令未下发（如需离线生效，请使用「设备影子-期望值」）");
+        }
+
         // 1. 落库 status=0 待下发
         Command cmd = new Command();
         cmd.setDeviceId(device.getId());
@@ -67,10 +78,9 @@ public class CommandServiceImpl implements CommandService {
         cmd.setUpdatedAt(LocalDateTime.now());
         commandMapper.insert(cmd);
 
-        // 2. E1 在线判定闸门：设备离线时不再「无条件 publish」
-        //    原因：MQTT publish 是 fire-and-forget，EMQX 对无人订阅的 topic 依然返回成功
-        //    （EmqxClient 还是 retain=false），离线 publish 会谎报 status=1，60s 后只能变超时。
-        //    改为「保持 status=0 挂起」，等设备上线由 replayPending() 补发。
+        // 2. E1 期望状态语义的挂起闸门：设备离线时保持 status=0，不 publish
+        //    （MQTT publish 是 fire-and-forget，EMQX 对无人订阅的 topic 依然返回成功，
+        //     且 EmqxClient 为 retain=false——离线硬发会谎报 status=1，60s 后只能变超时）
         if (!isOnline(device)) {
             log.info("command queued (device offline): request_id={}, device_key={}",
                     cmd.getRequestId(), deviceKey);

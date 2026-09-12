@@ -15,6 +15,8 @@ public final class ErrorCode {
     public static final int PARAM_ERROR = 4001;
     /** 设备不存在 */
     public static final int DEVICE_NOT_FOUND = 4004;
+    /** 设备不在线（E1 语义分家：命令下发遇离线直接失败） */
+    public static final int DEVICE_OFFLINE = 4005;
     /** 鉴权失败 */
     public static final int AUTH_FAILED = 4010;
     /** 服务内部错误 */
