@@ -8,6 +8,7 @@
         <span>物联网 PaaS 控制台</span>
       </div>
       <div class="topbar-right">
+        <el-button text @click="$router.push('/products')">产品与物模型</el-button>
         <span class="user">
           <el-icon><UserFilled /></el-icon>
           {{ username }}

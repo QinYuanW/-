@@ -13,8 +13,22 @@
           </el-radio-group>
         </el-form-item>
 
-        <el-form-item label="产品标识" required>
-          <el-input v-model="form.product_key" placeholder="如 p_demo_001" />
+        <el-form-item label="产品" required>
+          <el-select
+            v-model="form.product_key"
+            filterable
+            allow-create
+            default-first-option
+            placeholder="选择产品，或输入 product_key"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="p in products"
+              :key="p.product_key"
+              :label="`${p.name}（${p.product_key}）`"
+              :value="p.product_key"
+            />
+          </el-select>
         </el-form-item>
 
         <template v-if="mode === 'single'">
@@ -65,7 +79,7 @@
 import { ref, reactive } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
-import { registerDevice, registerBatch } from '../api'
+import { registerDevice, registerBatch, listProducts } from '../api'
 
 const emit = defineEmits(['registered'])
 
@@ -73,6 +87,7 @@ const dialogVisible = ref(false)
 const resultVisible = ref(false)
 const submitting = ref(false)
 const mode = ref('single')
+const products = ref([])
 const form = reactive({
   product_key: 'p_demo_001',
   device_key: '',
@@ -82,8 +97,18 @@ const form = reactive({
 })
 const resultItems = ref([])
 
+async function loadProducts() {
+  try {
+    const res = await listProducts()
+    products.value = res.data.items || []
+  } catch (e) {
+    products.value = [] // 加载失败仍可手输 product_key（allow-create）
+  }
+}
+
 function openDialog() {
   dialogVisible.value = true
+  loadProducts()
 }
 
 async function submit() {

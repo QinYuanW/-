@@ -12,6 +12,12 @@ const routes = [
     name: 'console',
     component: () => import('../views/Console.vue'),
     meta: { title: '设备控制台' }
+  },
+  {
+    path: '/products',
+    name: 'products',
+    component: () => import('../views/Products.vue'),
+    meta: { title: '产品与物模型' }
   }
 ]
 

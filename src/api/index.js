@@ -65,4 +65,18 @@ export const registerDevice = (data) =>
 export const registerBatch = (data) =>
   http.post('/devices/batch', data)
 
+// ===== E5 产品与物模型管理 =====
+
+export const listProducts = () =>
+  http.get('/products')
+
+export const createProduct = (data) =>
+  http.post('/products', data)
+
+export const getProductTsl = (productKey) =>
+  http.get(`/products/${productKey}/tsl`)
+
+export const updateProductTsl = (productKey, tsl) =>
+  http.put(`/products/${productKey}/tsl`, tsl)
+
 export default http
