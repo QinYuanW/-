@@ -15,9 +15,10 @@ public interface DeviceService {
      * @param page 页码
      * @param size 每页数量
      * @param keyword 搜索关键词
+     * @param productKey 产品标识筛选；null/空白 = 不过滤（E5）
      * @return 设备列表
      */
-    Page<DeviceVO> listDevices(int page, int size, String keyword);
+    Page<DeviceVO> listDevices(int page, int size, String keyword, String productKey);
     /**
      * 查询设备最新遥测数据
      * @param deviceKey 设备密钥

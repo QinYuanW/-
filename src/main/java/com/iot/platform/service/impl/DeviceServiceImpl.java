@@ -51,7 +51,7 @@ public class DeviceServiceImpl implements DeviceService {
     private static final long OFFLINE_TIMEOUT_SECONDS = 60;
 
     @Override
-    public Page<DeviceVO> listDevices(int page, int size, String keyword) {
+    public Page<DeviceVO> listDevices(int page, int size, String keyword, String productKey) {
         Page<Device> devicePage = new Page<>(page, size);
         LambdaQueryWrapper<Device> wrapper = new LambdaQueryWrapper<Device>()
                 .orderByDesc(Device::getOnlineStatus)
@@ -59,6 +59,10 @@ public class DeviceServiceImpl implements DeviceService {
         if (keyword != null && !keyword.isBlank()) {
             wrapper.and(w -> w.like(Device::getDeviceKey, keyword)
                     .or().like(Device::getDeviceName, keyword));
+        }
+        // E5：按产品筛选（产品可增删后，设备需要能按归属产品区分）
+        if (productKey != null && !productKey.isBlank()) {
+            wrapper.eq(Device::getProductKey, productKey);
         }
         deviceMapper.selectPage(devicePage, wrapper);
 

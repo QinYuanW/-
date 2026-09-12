@@ -32,8 +32,9 @@ public class DeviceController {
     @GetMapping("/devices")
     public Result<Map<String, Object>> list(@RequestParam(defaultValue = "1") int page,
                                             @RequestParam(defaultValue = "20") int size,
-                                            @RequestParam(required = false) String keyword) {
-        Page<DeviceVO> result = deviceService.listDevices(page, size, keyword);
+                                            @RequestParam(required = false) String keyword,
+                                            @RequestParam(name = "product_key", required = false) String productKey) {
+        Page<DeviceVO> result = deviceService.listDevices(page, size, keyword, productKey);
         return Result.ok(Map.of("total", result.getTotal(), "items", result.getRecords()));
     }
 
