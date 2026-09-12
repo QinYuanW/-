@@ -28,9 +28,11 @@
             :total="total"
             :page="page"
             :size="size"
+            :products="products"
             @select="handleSelect"
             @search="handleSearch"
             @page-change="handlePageChange"
+            @filter="handleFilter"
           />
         </div>
       </aside>
@@ -99,7 +101,7 @@ import DeviceRegister from '../components/DeviceRegister.vue'
 import MetricCards from '../components/MetricCards.vue'
 import HistoryChart from '../components/HistoryChart.vue'
 import ControlPanel from '../components/ControlPanel.vue'
-import { listDevices, getTsl, getLatestTelemetry } from '../api'
+import { listDevices, getTsl, getLatestTelemetry, listProducts } from '../api'
 
 const router = useRouter()
 const username = localStorage.getItem('iot_username') || 'admin'
@@ -112,6 +114,9 @@ const page = ref(1)
 const size = ref(20)
 const total = ref(0)
 const keyword = ref('')
+// E5：产品筛选与产品列表（供设备列表显示产品名 / 按产品过滤）
+const products = ref([])
+const productKey = ref('')
 
 const tsl = ref(null)
 const latest = ref({})
@@ -127,7 +132,7 @@ let pollTimer = null
 async function loadDevices() {
   deviceLoading.value = true
   try {
-    const res = await listDevices(page.value, size.value, keyword.value)
+    const res = await listDevices(page.value, size.value, keyword.value, productKey.value)
     devices.value = res.data.items || []
     total.value = res.data.total || 0
     if (!selectedKey.value && devices.value.length) {
@@ -138,8 +143,22 @@ async function loadDevices() {
   }
 }
 
+async function loadProducts() {
+  try {
+    products.value = (await listProducts()).data.items || []
+  } catch (e) {
+    products.value = []
+  }
+}
+
 function handleSearch(kw) {
   keyword.value = kw
+  page.value = 1
+  loadDevices()
+}
+
+function handleFilter(pk) {
+  productKey.value = pk
   page.value = 1
   loadDevices()
 }
@@ -189,6 +208,7 @@ async function handleLogout() {
 
 onMounted(() => {
   loadDevices()
+  loadProducts()
   pollTimer = setInterval(() => {
     if (selectedKey.value) loadLatest()
   }, 5000)

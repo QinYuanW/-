@@ -19,6 +19,22 @@
         </template>
       </el-input>
     </div>
+    <div class="dev-filter">
+      <el-select
+        v-model="productKey"
+        size="small"
+        clearable
+        placeholder="按产品筛选（E5）"
+        @change="handleFilter"
+      >
+        <el-option
+          v-for="p in products"
+          :key="p.product_key"
+          :label="`${p.name}（${p.product_key}）`"
+          :value="p.product_key"
+        />
+      </el-select>
+    </div>
     <el-scrollbar class="dev-scroll">
       <div
         v-for="dev in devices"
@@ -31,7 +47,10 @@
           <span class="dot" :class="dev.online_status === 1 ? 'on' : ''"></span>
           {{ dev.device_name || dev.device_key }}
         </div>
-        <div class="dev-meta">{{ dev.device_key }} · {{ dev.online_status === 1 ? '在线' : '离线' }}</div>
+        <div class="dev-meta">
+          {{ dev.device_key }} · {{ productName(dev.product_key) }} ·
+          {{ dev.online_status === 1 ? '在线' : '离线' }}
+        </div>
       </div>
       <el-empty v-if="!loading && !devices.length" description="暂无设备" :image-size="60" />
     </el-scrollbar>
@@ -59,15 +78,28 @@ const props = defineProps({
   loading: { type: Boolean, default: false },
   total: { type: Number, default: 0 },
   page: { type: Number, default: 1 },
-  size: { type: Number, default: 20 }
+  size: { type: Number, default: 20 },
+  // E5：产品列表（用于筛选下拉与设备行上的产品名显示）
+  products: { type: Array, default: () => [] }
 })
 
-const emit = defineEmits(['select', 'search', 'page-change'])
+const emit = defineEmits(['select', 'search', 'page-change', 'filter'])
 
 const keyword = ref('')
+const productKey = ref('')
+
+// product_key → 产品名（未匹配时退回 key 本身）
+function productName(key) {
+  const p = props.products.find((x) => x.product_key === key)
+  return p ? p.name : key || '-'
+}
 
 function handleSearch() {
   emit('search', keyword.value.trim())
+}
+
+function handleFilter() {
+  emit('filter', productKey.value || '')
 }
 
 function handlePageChange(p) {
@@ -99,6 +131,10 @@ function handlePageChange(p) {
 
 .dev-search {
   padding: 10px 12px 0;
+}
+
+.dev-filter {
+  padding: 8px 12px 0;
 }
 
 .dev-scroll {

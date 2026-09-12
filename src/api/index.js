@@ -41,8 +41,8 @@ http.interceptors.response.use(
 export const login = (username, password) =>
   http.post('/login', { username, password })
 
-export const listDevices = (page = 1, size = 20, keyword = '') =>
-  http.get('/devices', { params: { page, size, keyword } })
+export const listDevices = (page = 1, size = 20, keyword = '', productKey = '') =>
+  http.get('/devices', { params: { page, size, keyword, product_key: productKey || undefined } })
 
 export const getTsl = (deviceKey) =>
   http.get(`/devices/${deviceKey}/tsl`)
