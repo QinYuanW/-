@@ -84,6 +84,15 @@
               />
             </div>
           </div>
+
+          <!-- E1 设备影子：期望值 / 上报值 / 差异 + 离线指令队列 -->
+          <div class="panel">
+            <div class="panel-title">
+              设备影子 · 期望值 / 上报值 / 差异
+              <el-tag size="small" type="success" effect="plain" style="margin-left: 8px">E1</el-tag>
+            </div>
+            <ShadowPanel :device-key="selectedKey" :tsl="tsl" />
+          </div>
         </template>
 
         <el-empty v-else description="请选择左侧设备" />
@@ -101,6 +110,7 @@ import DeviceRegister from '../components/DeviceRegister.vue'
 import MetricCards from '../components/MetricCards.vue'
 import HistoryChart from '../components/HistoryChart.vue'
 import ControlPanel from '../components/ControlPanel.vue'
+import ShadowPanel from '../components/ShadowPanel.vue'
 import { listDevices, getTsl, getLatestTelemetry, listProducts } from '../api'
 
 const router = useRouter()

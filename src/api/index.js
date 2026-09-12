@@ -79,4 +79,18 @@ export const getProductTsl = (productKey) =>
 export const updateProductTsl = (productKey, tsl) =>
   http.put(`/products/${productKey}/tsl`, tsl)
 
+// ===== E1 设备影子 =====
+
+export const getShadow = (deviceKey) =>
+  http.get(`/devices/${deviceKey}/shadow`)
+
+export const setShadowDesired = (deviceKey, desired) =>
+  http.put(`/devices/${deviceKey}/shadow/desired`, desired)
+
+export const clearShadow = (deviceKey) =>
+  http.delete(`/devices/${deviceKey}/shadow`)
+
+export const listPendingCommands = (deviceKey) =>
+  http.get(`/devices/${deviceKey}/commands/pending`)
+
 export default http
