@@ -2,6 +2,27 @@
 
 > 每解决一个问题/BUG 立即追加记录：现象 / 场景 / 排查根因 / 状态
 
+## 2026-09-12
+
+### BUG-22：MySQL57 意外停止（BUG-3 磁盘 I/O 卡顿升级版）——`Windows aio` 返回 OS error 121，InnoDB 放弃运行
+
+- **现象**：10:23 起后端 `/actuator/health` 的 db 变 DOWN（`Failed to obtain JDBC Connection`），直连报 `ERROR 2003 (10061)` 连接被拒；`Get-Service MySQL57` = **Stopped**（StartType=Auto 却未自启）。系统事件日志：**「服务 MySQL57 意外停止。这发生了 3 次」**（09-11 16:28、09-12 10:25 均复现）。E1 第二轮运行验证被迫中断。
+- **场景**：D2-2 封板后的次日早晨，无任何业务在跑（夜里空闲）。
+- **排查根因**（Windows 事件日志「Application」，来源=MySQL，Id=100，证据链完整）：
+  1. **I/O 被长时间卡死**：`InnoDB: page_cleaner: 1000ms intended loop took 35854724ms`（≈**9.96 小时**）——与 BUG-3「page_cleaner 卡 9 小时」同型，且较 09-11 22:43 的 316325ms（5.3 分钟）**显著恶化**。
+  2. **AIO 超时致命**：`InnoDB: File .\ibdata1: 'Windows aio' returned OS error 121. Cannot continue operation`（OS error 121 = ERROR_SEM_TIMEOUT，Windows 原生异步 I/O 信号量超时）。
+  3. InnoDB 判定不可恢复 → 拒绝继续 → MySQL 进程退出；伴随 `18 threads created by InnoDB had not exited at shutdown!`。
+- **环境取证（为何 I/O 被卡）**：
+  - 唯一杀软 = **Windows Defender，实时保护开启**；`Get-MpPreference` 的排除清单**需管理员才能查看** → 无法确认 `D:\AppData\MySQLData` 是否已按 BUG-3 建议加白名单（大概率没加）。从未做过全盘扫描（FullScanStartTime 为空），最近快速扫描是 09-07。
+  - **新发现的共犯：`D:\DockerDesktop` 与 MySQL 数据目录（`datadir=D:/AppData/MySQLData`，190.7MB）同在 D 盘** —— 7 个常驻容器（EMQX/Redis/Kafka/Prometheus/Grafana/Alertmanager，Kafka 是顺序写大户）+ Docker 自身 vhdx，与 MySQL **共用一块盘的 I/O**。
+  - `my.ini`（`C:\ProgramData\MySQL\MySQL Server 5.7\my.ini`，服务启动参数 `--defaults-file` 指向此处，`[mysqld]` 在 L76）**未配置 `innodb_use_native_aio`** → 默认**开启** Windows 原生 AIO，磁盘一卡即触发 OS error 121 **硬失败**；另 `innodb_buffer_pool_size=8M`（安装器默认，偏小，进一步放大磁盘回写压力）。
+- **修复方向（按优先级）**：
+  1. **`my.ini` 的 `[mysqld]` 加 `innodb_use_native_aio=0`** —— 治本于 error 121：AIO 超时不再是"不可继续"的硬失败。需管理员改文件 + 重启 MySQL。
+  2. **把 `D:\AppData\MySQLData` 加入 Defender 排除目录**（落实 BUG-3 遗留建议）：管理员执行 `Add-MpPreference -ExclusionPath 'D:\AppData\MySQLData'`。
+  3. （可选调优）`innodb_buffer_pool_size` 8M → 256M，减少磁盘回写频率。
+- **恢复操作**：`net start MySQL57` 需管理员（非提权 shell 报「系统错误 5 拒绝访问」，`Start-Service` 同样失败）——BUG-16 的 UAC 提权法可用。
+- **状态**：🟡 根因已定位、修复方案已给出，**待管理员执行**（改 my.ini + 重启服务 + 加排除目录）。
+
 ## 2026-09-11
 
 ### BUG-18：D1 端到端可靠性压测——Kafka 段 offset 续消费生效，但 EMQX webhook `request_ttl=45s` 在突发+后端宕机时过期丢弃 10798 条
