@@ -156,6 +156,23 @@ public class ShadowServiceImpl implements ShadowService {
         }
     }
 
+    @Override
+    public void invalidateTslCache(java.util.Collection<String> deviceKeys) {
+        if (deviceKeys == null || deviceKeys.isEmpty()) {
+            return;
+        }
+        int cleared = 0;
+        for (String dk : deviceKeys) {
+            try {
+                cleared += redisTemplate.delete(TSL_CACHE_PREFIX + dk + ":all") ? 1 : 0;
+                cleared += redisTemplate.delete(TSL_CACHE_PREFIX + dk + ":writable") ? 1 : 0;
+            } catch (Exception e) {
+                log.warn("shadow TSL cache invalidate failed: device_key={}, err={}", dk, e.getMessage());
+            }
+        }
+        log.info("shadow TSL cache invalidated: devices={}, keys_deleted={}", deviceKeys.size(), cleared);
+    }
+
     // ------------------------------------------------------------------ 内部
 
     private String key(String deviceKey) {

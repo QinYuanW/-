@@ -31,4 +31,11 @@ public interface ShadowService {
 
     /** 清除某设备的影子（设备删除/重置时使用） */
     void clear(String deviceKey);
+
+    /**
+     * E5：物模型（TSL）变更后，失效指定设备的「TSL 属性白名单」缓存。
+     *
+     * <p>不清缓存的话，新增的属性会在最长 1 小时内被影子当作「未声明属性」拒绝/漏记。
+     */
+    void invalidateTslCache(java.util.Collection<String> deviceKeys);
 }
