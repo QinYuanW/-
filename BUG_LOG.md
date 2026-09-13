@@ -330,3 +330,16 @@
 - **修复**：在 `Console.vue` 的 `import { ... } from 'vue'` 中补回 `computed`。
 - **验证**：`vite build` 通过 + 浏览器实测控制台页正常渲染 ✅。
 - **状态**：✅ 已解决（提醒：纯前端布局重构后必须浏览器冒烟，不能只信 build）
+
+### BUG-25：`git rm` 单个文件却导致整棵 `src/main/java` 目录树消失（已恢复）
+
+- **现象**：在 `iot-platform` 执行 `git rm src/main/java/com/iot/platform/controller/DemoController.java`，命令回显完全正常（`rm '.../DemoController.java'`）。但紧接着 `git status` 显示 **`src/main/java` 下 70 余个 java 文件全部为「未暂存删除」**；用 `[ -f ]` 逐个验证，确认文件**真实缺失**。诡异的是 `src/main/resources/`（含 `application.yml`）完好无损。
+- **影响面**：`iot-platform` 全部源码险些全灭。
+- **恢复**：因这些删除均是**未暂存**状态且 HEAD 完好，执行 `git restore --worktree src/` **一次性完整恢复**；被 `git rm` 的那一个文件因已 staged（`D `），保持删除 —— 正是预期结果。恢复后三仓库源文件/文档逐一 `[ -f ]` 验证存在 ✅。
+- **根因（未完全定位）**：命令本身无通配符、只指定单文件路径。高度怀疑是**本机沙箱环境 + 便携版 Git（PortableGit 1.2.0）在 `git rm` 时对目录树做了过度删除**。同类风险此前未出现过（历史 `git add`/`git commit` 均正常）。
+- **规避措施（重要）**：
+  1. 本项目内**删除仓库文件不要用 `git rm`（也慎用 `rm`）** —— 改用编辑器的删除功能，或让 IDEA 处理；
+  2. 任何删除类命令执行后，**必须立即 `git status` 核对待删/已删文件清单**，不能只信命令回显；
+  3. 若已误删：文件处于**未暂存删除**时用 `git restore --worktree <path>` 恢复（不要用 `git reset --hard`，会波及正确改动）。
+- **教训**：`git rm` 回显正常 **≠** 只删了那一个文件。**删除类操作的验收标准是「事后核对影响面」，不是「命令没报错」。**
+- **状态**：✅ 已恢复并核实
