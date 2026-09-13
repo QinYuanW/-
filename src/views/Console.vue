@@ -95,7 +95,6 @@
       </el-dropdown>
       <el-button :icon="Download" @click="handleExportAll">导出全部</el-button>
       <el-button :icon="Tickets" @click="batchListRef?.open()">批次列表</el-button>
-      <el-button :icon="RefreshLeft" @click="handleDemoReset">演示重置</el-button>
     </div>
 
     <DeviceCards
@@ -136,8 +135,8 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Plus, Operation, Download, Tickets, RefreshLeft, Grid, List } from '@element-plus/icons-vue'
-import { listDevices, listProducts, deleteDevices, demoReset } from '../api'
+import { Search, Plus, Operation, Download, Tickets, Grid, List } from '@element-plus/icons-vue'
+import { listDevices, listProducts, deleteDevices } from '../api'
 import { downloadCsv, formatTime } from '../utils/export'
 import DeviceCards from '../components/DeviceCards.vue'
 import DeviceList from '../components/DeviceList.vue'
@@ -308,23 +307,6 @@ function exportRows(rows) {
     }))
   )
   ElMessage.success(`已导出 ${rows.length} 台设备`)
-}
-
-async function handleDemoReset() {
-  await ElMessageBox.confirm(
-    '将清空全部遥测/日志/指令数据，删除所有设备与产品，并重建演示基线（p_demo_001 + dev_demo_001）。确定继续吗？',
-    '演示数据一键重置',
-    { type: 'warning', confirmButtonText: '重置', confirmButtonClass: 'el-button--danger' }
-  )
-  try {
-    await demoReset()
-    ElMessage.success('演示数据已重置，回到初始基线')
-    page.value = 1
-    selectedKeys.value = []
-    await Promise.all([loadDevices(), loadProducts(), loadStats()])
-  } catch (e) {
-    // 拦截器已提示
-  }
 }
 
 onMounted(() => {
