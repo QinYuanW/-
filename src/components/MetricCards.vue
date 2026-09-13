@@ -52,6 +52,10 @@ function boolValue(key) {
 function formatValue(key) {
   const v = props.telemetry[key]
   const prop = properties.value.find((p) => p.key === key)
+  if (prop && prop.type === 'enum') {
+    const hit = (prop.elements || []).find((e) => String(e.value) === String(v))
+    return hit ? hit.key : String(v)
+  }
   if (prop && (prop.type === 'int' || prop.type === 'float')) {
     const n = Number(v)
     if (!Number.isNaN(n)) {

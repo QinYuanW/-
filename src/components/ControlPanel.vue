@@ -22,13 +22,29 @@
             :model-value="numValue(prop.key)"
             :min="prop.min ?? 0"
             :max="prop.max ?? 100"
-            :step="prop.type === 'int' ? 1 : 0.1"
+            :step="prop.step ?? (prop.type === 'int' ? 1 : 0.1)"
             :disabled="sendingKey === prop.key"
             style="flex: 1"
             @change="(v) => sendProperty(prop, v)"
           />
           <span class="slider-val">{{ numValue(prop.key) }}{{ prop.unit || '' }}</span>
         </div>
+        <el-select
+          v-else-if="prop.type === 'enum'"
+          :model-value="enumValue(prop.key)"
+          :loading="sendingKey === prop.key"
+          size="small"
+          style="width: 160px"
+          placeholder="选择枚举值"
+          @change="(v) => sendProperty(prop, v)"
+        >
+          <el-option
+            v-for="opt in prop.elements || []"
+            :key="String(opt.value)"
+            :value="opt.value"
+            :label="opt.key"
+          />
+        </el-select>
         <el-input
           v-else
           :model-value="String(telemetry[prop.key] ?? '')"
@@ -131,6 +147,15 @@ function numValue(key) {
   const v = optimistic.value[key] ?? props.telemetry[key]
   const n = Number(v)
   return Number.isNaN(n) ? 0 : n
+}
+
+// 枚举当前值：与 elements 按字符串弱比较，规避遥测 1 与枚举 value 1（number）类型不一致导致的空显示
+function enumValue(key) {
+  const v = optimistic.value[key] ?? props.telemetry[key]
+  if (v === undefined || v === null || v === '') return ''
+  const prop = controls.value.find((p) => p.key === key)
+  const hit = (prop?.elements || []).find((e) => String(e.value) === String(v))
+  return hit ? hit.value : v
 }
 
 // 遥测刷新到该键后释放乐观覆盖，恢复真实数据驱动

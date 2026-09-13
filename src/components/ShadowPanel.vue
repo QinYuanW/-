@@ -36,10 +36,26 @@
             v-else-if="row.writable && (row.type === 'int' || row.type === 'float')"
             v-model="draft[row.key]"
             size="small"
-            :step="row.type === 'int' ? 1 : 0.1"
+            :step="row.step ?? (row.type === 'int' ? 1 : 0.1)"
             style="width: 130px"
             @change="touch(row.key)"
           />
+          <el-select
+            v-else-if="row.writable && row.type === 'enum'"
+            v-model="draft[row.key]"
+            size="small"
+            clearable
+            style="width: 140px"
+            placeholder="选择枚举值"
+            @change="touch(row.key)"
+          >
+            <el-option
+              v-for="opt in row.elements || []"
+              :key="String(opt.value)"
+              :value="opt.value"
+              :label="opt.key"
+            />
+          </el-select>
           <el-input
             v-else-if="row.writable"
             v-model="draft[row.key]"
@@ -53,7 +69,7 @@
       <el-table-column label="上报值 reported" min-width="110">
         <template #default="{ row }">
           <span v-if="row.reported === undefined" class="sp-dash">未上报</span>
-          <code v-else>{{ row.reported }}{{ row.unit || '' }}</code>
+          <code v-else>{{ reportedText(row) }}{{ row.unit || '' }}</code>
         </template>
       </el-table-column>
       <el-table-column label="状态" width="96">
@@ -132,6 +148,8 @@ const rows = computed(() =>
       name: p.name,
       type: p.type,
       unit: p.unit,
+      step: p.step,
+      elements: p.elements,
       writable: p.access === 'readwrite',
       reported: r,
       tagText,
@@ -139,6 +157,12 @@ const rows = computed(() =>
     }
   })
 )
+
+function reportedText(row) {
+  if (row.type !== 'enum') return row.reported
+  const hit = (row.elements || []).find((e) => String(e.value) === String(row.reported))
+  return hit ? hit.key : row.reported
+}
 
 function touch(key) {
   dirty[key] = true

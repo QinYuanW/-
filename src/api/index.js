@@ -41,8 +41,29 @@ http.interceptors.response.use(
 export const login = (username, password) =>
   http.post('/login', { username, password })
 
-export const listDevices = (page = 1, size = 20, keyword = '', productKey = '') =>
-  http.get('/devices', { params: { page, size, keyword, product_key: productKey || undefined } })
+export const listDevices = (page = 1, size = 20, keyword = '', productKey = '', onlineStatus = 0) =>
+  http.get('/devices', {
+    params: {
+      page,
+      size,
+      keyword: keyword || undefined,
+      product_key: productKey || undefined,
+      online_status: onlineStatus > 0 ? onlineStatus : undefined
+    }
+  })
+
+// ===== 3.3 设备列表增强 =====
+
+export const deleteDevices = (deviceKeys) =>
+  http.delete('/devices', { data: { device_keys: deviceKeys } })
+
+export const listDeviceLogs = (deviceKey, page = 1, size = 20) =>
+  http.get(`/devices/${deviceKey}/logs`, { params: { page, size } })
+
+// ===== G5 演示数据一键重置 =====
+
+export const demoReset = () =>
+  http.post('/demo/reset')
 
 export const getTsl = (deviceKey) =>
   http.get(`/devices/${deviceKey}/tsl`)
