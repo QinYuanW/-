@@ -45,6 +45,7 @@
         placeholder="搜索 device_key / 名称"
         clearable
         :prefix-icon="Search"
+        @input="onSearchInput"
         @keyup.enter="handleSearch"
         @clear="handleSearch"
       />
@@ -132,7 +133,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Plus, Operation, Download, Tickets, Grid, List } from '@element-plus/icons-vue'
@@ -205,8 +206,19 @@ async function loadStats() {
   }
 }
 
+let searchTimer = null
+
+/** 边输边搜（300ms 防抖）：原来只有回车才触发，用户输完没反应会以为搜索坏了 */
+function onSearchInput() {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(handleSearch, 300)
+}
+
 function handleSearch() {
+  clearTimeout(searchTimer)
   page.value = 1
+  listRef.value?.clearSelection()
+  selectedKeys.value = []
   loadDevices()
 }
 
@@ -314,6 +326,8 @@ onMounted(() => {
   loadProducts()
   loadStats()
 })
+
+onBeforeUnmount(() => clearTimeout(searchTimer))
 </script>
 
 <style scoped>
