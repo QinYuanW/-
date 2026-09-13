@@ -16,9 +16,26 @@ public interface DeviceService {
      * @param size 每页数量
      * @param keyword 搜索关键词
      * @param productKey 产品标识筛选；null/空白 = 不过滤（E5）
+     * @param onlineStatus 在线状态筛选：null/0 不过滤，1 在线，2 离线（3.3 列表增强）
      * @return 设备列表
      */
-    Page<DeviceVO> listDevices(int page, int size, String keyword, String productKey);
+    Page<DeviceVO> listDevices(int page, int size, String keyword, String productKey, Integer onlineStatus);
+
+    /**
+     * 批量删除设备（级联清理遥测/日志/指令/影子，3.3 列表增强）
+     * @param deviceKeys 待删除设备标识列表
+     * @return 实际删除数量
+     */
+    int deleteDevices(List<String> deviceKeys);
+
+    /**
+     * 分页查询设备操作日志（详情页「操作日志」tab）
+     * @param deviceKey 设备标识
+     * @param page 页码
+     * @param size 每页数量
+     * @return 日志分页
+     */
+    Page<Map<String, Object>> listDeviceLogs(String deviceKey, int page, int size);
     /**
      * 查询设备最新遥测数据
      * @param deviceKey 设备密钥

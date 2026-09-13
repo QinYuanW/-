@@ -11,17 +11,21 @@ import com.iot.platform.dto.DeviceRegisterRequest;
 import com.iot.platform.dto.DeviceRegisterVO;
 import com.iot.platform.dto.DeviceVO;
 import com.iot.platform.dto.TelemetryPointVO;
+import com.iot.platform.entity.Command;
 import com.iot.platform.entity.Device;
 import com.iot.platform.entity.DeviceLog;
 import com.iot.platform.entity.DeviceTelemetry;
 import com.iot.platform.entity.Product;
+import com.iot.platform.mapper.CommandMapper;
 import com.iot.platform.mapper.DeviceLogMapper;
 import com.iot.platform.mapper.DeviceMapper;
 import com.iot.platform.mapper.DeviceTelemetryMapper;
 import com.iot.platform.mapper.ProductMapper;
 import com.iot.platform.service.DeviceService;
+import com.iot.platform.service.ShadowService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -42,6 +46,9 @@ public class DeviceServiceImpl implements DeviceService {
     private final DeviceTelemetryMapper telemetryMapper;
     private final ProductMapper productMapper;
     private final DeviceLogMapper deviceLogMapper;
+    private final CommandMapper commandMapper;
+    private final ShadowService shadowService;
+    private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
 
     private static final SecureRandom RANDOM = new SecureRandom();
@@ -51,7 +58,7 @@ public class DeviceServiceImpl implements DeviceService {
     private static final long OFFLINE_TIMEOUT_SECONDS = 60;
 
     @Override
-    public Page<DeviceVO> listDevices(int page, int size, String keyword, String productKey) {
+    public Page<DeviceVO> listDevices(int page, int size, String keyword, String productKey, Integer onlineStatus) {
         Page<Device> devicePage = new Page<>(page, size);
         LambdaQueryWrapper<Device> wrapper = new LambdaQueryWrapper<Device>()
                 .orderByDesc(Device::getOnlineStatus)
@@ -64,11 +71,67 @@ public class DeviceServiceImpl implements DeviceService {
         if (productKey != null && !productKey.isBlank()) {
             wrapper.eq(Device::getProductKey, productKey);
         }
+        // 3.3：状态筛选（1 在线 / 2 离线），null 或 0 = 不过滤
+        if (onlineStatus != null && onlineStatus > 0) {
+            wrapper.eq(Device::getOnlineStatus, onlineStatus == 2 ? 0 : 1);
+        }
         deviceMapper.selectPage(devicePage, wrapper);
 
         Page<DeviceVO> voPage = new Page<>(page, size, devicePage.getTotal());
         // ← 每个 Device 实体 → 调 DeviceVO.from() → 变成 DeviceVO 实体
         voPage.setRecords(devicePage.getRecords().stream().map(DeviceVO::from).collect(Collectors.toList()));
+        return voPage;
+    }
+
+    @Override
+    public int deleteDevices(List<String> deviceKeys) {
+        if (deviceKeys == null || deviceKeys.isEmpty()) {
+            return 0;
+        }
+        int deleted = 0;
+        for (String deviceKey : deviceKeys) {
+            Device device = deviceMapper.selectOne(
+                    new LambdaQueryWrapper<Device>().eq(Device::getDeviceKey, deviceKey));
+            if (device == null) {
+                continue;
+            }
+            Long deviceId = device.getId();
+            // 事件流表只增不改：删设备时级联清理其遥测/日志/指令，避免孤儿数据
+            telemetryMapper.delete(new LambdaQueryWrapper<DeviceTelemetry>().eq(DeviceTelemetry::getDeviceId, deviceId));
+            deviceLogMapper.delete(new LambdaQueryWrapper<DeviceLog>().eq(DeviceLog::getDeviceId, deviceId));
+            commandMapper.delete(new LambdaQueryWrapper<Command>().eq(Command::getDeviceId, deviceId));
+            deviceMapper.deleteById(deviceId);
+            // 缓存联动：影子 / 鉴权 / device_key→id 映射
+            shadowService.clear(deviceKey);
+            redisTemplate.delete(List.of("auth:" + deviceKey, "did:" + deviceKey, "shadow:tsl:" + deviceKey));
+            deleted++;
+            log.info("device deleted: device_key={}", deviceKey);
+        }
+        return deleted;
+    }
+
+    @Override
+    public Page<Map<String, Object>> listDeviceLogs(String deviceKey, int page, int size) {
+        Device device = deviceMapper.selectOne(
+                new LambdaQueryWrapper<Device>().eq(Device::getDeviceKey, deviceKey));
+        Page<DeviceLog> logPage = new Page<>(page, size);
+        Page<Map<String, Object>> voPage = new Page<>(page, size, 0);
+        if (device == null) {
+            voPage.setRecords(Collections.emptyList());
+            return voPage;
+        }
+        deviceLogMapper.selectPage(logPage, new LambdaQueryWrapper<DeviceLog>()
+                .eq(DeviceLog::getDeviceId, device.getId())
+                .orderByDesc(DeviceLog::getCreatedAt));
+        voPage = new Page<>(page, size, logPage.getTotal());
+        voPage.setRecords(logPage.getRecords().stream().map(l -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", l.getId());
+            m.put("log_type", l.getLogType());
+            m.put("content", l.getContent());
+            m.put("created_at", l.getCreatedAt() != null ? l.getCreatedAt().toString() : null);
+            return m;
+        }).collect(Collectors.toList()));
         return voPage;
     }
 

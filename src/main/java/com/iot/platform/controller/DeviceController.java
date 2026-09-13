@@ -33,8 +33,26 @@ public class DeviceController {
     public Result<Map<String, Object>> list(@RequestParam(defaultValue = "1") int page,
                                             @RequestParam(defaultValue = "20") int size,
                                             @RequestParam(required = false) String keyword,
-                                            @RequestParam(name = "product_key", required = false) String productKey) {
-        Page<DeviceVO> result = deviceService.listDevices(page, size, keyword, productKey);
+                                            @RequestParam(name = "product_key", required = false) String productKey,
+                                            @RequestParam(name = "online_status", required = false) Integer onlineStatus) {
+        Page<DeviceVO> result = deviceService.listDevices(page, size, keyword, productKey, onlineStatus);
+        return Result.ok(Map.of("total", result.getTotal(), "items", result.getRecords()));
+    }
+
+    /** 3.3 批量删除设备：body {"device_keys": ["dev_xxx", ...]} */
+    @DeleteMapping("/devices")
+    public Result<Map<String, Object>> deleteBatch(@RequestBody Map<String, List<String>> body) {
+        List<String> keys = body.getOrDefault("device_keys", List.of());
+        int deleted = deviceService.deleteDevices(keys);
+        return Result.ok(Map.of("deleted", deleted));
+    }
+
+    /** 3.3 详情页「操作日志」：设备上下线/操作记录分页 */
+    @GetMapping("/devices/{deviceKey}/logs")
+    public Result<Map<String, Object>> deviceLogs(@PathVariable String deviceKey,
+                                                  @RequestParam(defaultValue = "1") int page,
+                                                  @RequestParam(defaultValue = "20") int size) {
+        Page<Map<String, Object>> result = deviceService.listDeviceLogs(deviceKey, page, size);
         return Result.ok(Map.of("total", result.getTotal(), "items", result.getRecords()));
     }
 
