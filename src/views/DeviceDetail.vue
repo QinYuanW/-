@@ -4,6 +4,7 @@
       <el-button text :icon="Back" @click="$router.push('/')">返回</el-button>
       <span class="device-name">{{ device?.device_name || key }}</span>
       <el-tag size="small" type="info" effect="plain">{{ key }}</el-tag>
+      <el-button text size="small" :icon="CopyDocument" title="复制 device_key" @click="copyKey" />
       <span class="online-dot" :class="online ? 'on' : ''"></span>
       <span class="online-text">{{ online ? '在线' : '离线' }}</span>
     </div>
@@ -109,16 +110,19 @@
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
-import { useRoute } from 'vue-router'
-import { Back } from '@element-plus/icons-vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import { Back, CopyDocument } from '@element-plus/icons-vue'
 import { listDevices, listProducts, getTsl, getLatestTelemetry, listDeviceLogs } from '../api'
 import { formatTime } from '../utils/export'
+import { copyText } from '../utils/clipboard'
 import MetricCards from '../components/MetricCards.vue'
 import HistoryChart from '../components/HistoryChart.vue'
 import ControlPanel from '../components/ControlPanel.vue'
 import ShadowPanel from '../components/ShadowPanel.vue'
 
 const route = useRoute()
+const router = useRouter()
 
 const key = computed(() => route.params.key)
 const device = ref(null)
@@ -135,6 +139,18 @@ watch(
     if (DETAIL_TABS.includes(t)) activeTab.value = t
   }
 )
+
+// tab 变化写回 URL：刷新后停在同一 tab，链接也能直接分享
+watch(activeTab, (t) => {
+  if (route.query.tab === t) return   // 防止与上面「URL → tab」方向形成回环
+  router.replace({ query: { ...route.query, tab: t } })
+})
+
+async function copyKey() {
+  const ok = await copyText(key.value)
+  if (ok) ElMessage.success('已复制 device_key')
+  else ElMessage.error('复制失败，请手动选中复制')
+}
 
 // 操作日志
 const logs = ref([])
