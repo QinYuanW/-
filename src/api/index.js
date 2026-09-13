@@ -60,11 +60,6 @@ export const deleteDevices = (deviceKeys) =>
 export const listDeviceLogs = (deviceKey, page = 1, size = 20) =>
   http.get(`/devices/${deviceKey}/logs`, { params: { page, size } })
 
-// ===== G5 演示数据一键重置 =====
-
-export const demoReset = () =>
-  http.post('/demo/reset')
-
 export const getTsl = (deviceKey) =>
   http.get(`/devices/${deviceKey}/tsl`)
 
