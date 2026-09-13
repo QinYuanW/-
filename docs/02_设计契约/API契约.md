@@ -7,6 +7,7 @@
 > v1.1 变更：新增 §3.4 设备物模型 TSL 查询、§5 控制台登录（JWT）——支撑控制台前端「物模型驱动」动态渲染。
 > v1.2 变更：§3.1 设备列表新增 `keyword` 模糊搜索参数 + 在线优先排序（`online_status DESC, last_online_at DESC`）——支撑前端搜索框与分页。
 > v1.3 变更：§0.3 引用注释更新——「JWT 业务接口拦截器已落地」，查阅/下发等业务接口现已**强制校验 JWT**，仅 EMQX 三条回调与登录接口放行；补明放行清单。
+> v1.4 变更：**新增 §7 统计与告警（仪表盘）、§8 设备事件记录、§9 实时推送（WebSocket）**——补齐前端「物联概览」与设备详情 tab 的数据缺口；**新增附录 B「已实现接口索引」**，补录 v1.3 之后已落地但未入档的接口（3.3 列表增强、E5 产品与物模型、E1 设备影子、G5 演示重置），恢复「本文档 = 接口单一事实源」的地位。
 
 ---
 
@@ -489,3 +490,296 @@
 | 设备注册 | device_secret | device.device_secret（16 字节随机 hex） |
 
 > 这张表就是「表结构 → 接口契约」的推导链，也是面试能讲的点：**先签数据合同，接口入参出参自动确定，不会出现前后端字段对不上的返工**。
+
+---
+
+## 7. 统计与告警（控制台仪表盘「物联概览」）
+
+> **背景**：前端 `/dashboard` 已按「物联概览」版式重做（四统计卡 + 消息趋势 + 告警类型 + 告警消息表），当前数据**全部走 `src/mock/dashboard.js` 占位**（2026-09-13 按汤园决策「前端先用假数据看效果」）。本章接口落地后，前端**只需把那一行 mock import 换成 API 调用，组件代码零改动**。
+>
+> ⚠️ **依赖状态分两档**：
+> - **无前置依赖**：7.1 的 `product` / `device` / `message` 三段 + 7.2 全部 —— 现有 `product` / `device` / `device_telemetry` 表即可支撑。
+> - **依赖 E3**：7.1 的 `alarm` 段 + 7.3 —— 告警数据链路尚不存在，**E3 落地前恒返回 0 / 空列表**（前端按空态渲染，非错误）。
+
+### 7.1 概览统计
+
+| 项 | 值 |
+|----|----|
+| 方法 | `GET` |
+| 路径 | `/api/v1/stats/overview` |
+| 调用方 | 控制台仪表盘（进页面拉一次，可手动刷新） |
+
+**响应：**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "product": { "total": 33, "enabled": 15, "disabled": 18 },
+    "device": { "total": 1014, "online": 1, "offline": 1013, "enabled": 12, "disabled": 11 },
+    "message": { "total": 12079200, "month": 592800, "today": 39900 },
+    "alarm": { "total": 0, "month": 0, "today": 0 }
+  }
+}
+```
+
+| 字段 | 类型 | 数据口径（对应表字段） |
+|------|------|----------------------|
+| product.total | int | `product` 表 `deleted=0` 计数 |
+| product.enabled / disabled | int | 同上再加 `status=1` / `status=0` |
+| device.total | int | `device` 表 `deleted=0` 计数 |
+| device.online / offline | int | `device.online_status=1` / `=0`（`deleted=0`） |
+| device.enabled / disabled | int | `device.status=1` / `=0` |
+| message.total | int | `device_telemetry` 全表计数 |
+| message.month | int | `ts >= 当月 1 号 00:00:00` 计数 |
+| message.today | int | `ts >= 今日 00:00:00` 计数 |
+| alarm.total / month / today | int | **E3 前恒为 0**；口径同 message，取自告警表 |
+
+> ⚠️ **`message.total` 是本接口唯一的性能雷点**，实现三选一（按投入排序）：
+> ① **Redis 计数器**（写入侧 `INCR`，读侧 O(1)）—— **推荐**；代价是重放/回滚时计数会漂移，需提供对账脚本；
+> ② `information_schema.TABLES.TABLE_ROWS` 近似值 —— 零成本，千万行级误差通常 <10%，仪表盘场景可接受；
+> ③ 直接 `COUNT(*)` + 服务端 5s 缓存 —— 最简单，但大表首次调用仍会打到秒级。
+>
+> `message.month` / `today` 带 `ts` 范围条件，**可走 `device_telemetry` 的按月分区裁剪**，代价可控。`product` / `device` 均为小表，直接 count 无压力。
+>
+> 📌 **面试点**：这个接口正是「为什么需要 TDengine」的现场证据——`COUNT(*)` 与 7.2 的按月聚合在 MySQL 上都是全表/大范围扫描，迁移前后可直接对比。
+
+### 7.2 消息趋势（按月）
+
+| 项 | 值 |
+|----|----|
+| 方法 | `GET` |
+| 路径 | `/api/v1/stats/message-trend?months=12` |
+| 调用方 | 控制台仪表盘「设备消息」折线图 |
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|:---:|------|
+| months | int | 否 | 回溯月数（缺省 12，最大 24） |
+
+**响应：**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "items": [
+      { "month": "2026-08", "message": 620000, "alarm": 0 },
+      { "month": "2026-09", "message": 1514209, "alarm": 0 }
+    ]
+  }
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| month | string | `yyyy-MM`（**升序**返回，前端直接喂 x 轴） |
+| message | int | 该月 `device_telemetry` 计数 |
+| alarm | int | 该月告警数（**E3 前恒为 0**，前端画虚线系列） |
+
+> **实现**：`SELECT DATE_FORMAT(ts,'%Y-%m') AS m, COUNT(*) AS c FROM device_telemetry WHERE ts >= ? GROUP BY m ORDER BY m`。
+> ⚠️ **只返回「有数据的月份」**，缺失月由前端补 0 —— 这样后端不必构造空月份列表，接口更dumb。
+> 📌 **真实数据分布预警**：`device_telemetry` 的分区从 `2026-08` 起，实际数据集中在 `2026-09`。铺 12 个月会出现「左边 11 个月全 0、右边一根尖峰」的难看曲线。**演示前需决定**：造历史数据 / 把 `months` 收到有数据的区间 / 前端只渲染有数据的月份。
+
+### 7.3 告警消息列表
+
+| 项 | 值 |
+|----|----|
+| 方法 | `GET` |
+| 路径 | `/api/v1/alerts?page=1&size=10&level=&status=` |
+| 调用方 | 控制台仪表盘「告警消息」表 + 「告警类型」分布 |
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|:---:|------|
+| page / size | int | 否 | 分页（缺省 1 / 10） |
+| level | string | 否 | 级别筛选：`严重` / `一般` / `提示` |
+| status | string | 否 | 状态筛选：`未处理` / `已处理` |
+
+**响应：**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "total": 1,
+    "types": [
+      { "name": "规则告警", "count": 2 },
+      { "name": "系统告警", "count": 1 }
+    ],
+    "items": [
+      {
+        "id": 1,
+        "alarm_type": "规则告警",
+        "level": "严重",
+        "rule_name": "客厅温度超限告警",
+        "product_key": "p_demo_001",
+        "device_key": "dev_demo_001",
+        "status": "已处理",
+        "alarm_at": "2026-09-12 14:23:18"
+      }
+    ]
+  }
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| total | int | 满足筛选条件的总数（分页用） |
+| types | array | **告警类型分布**，供「告警类型」面板画饼图/条形；不受分页影响，受筛选条件影响 |
+| items[].alarm_type | string | 告警类型（规则告警 / 系统告警） |
+| items[].level | string | 级别（严重 / 一般 / 提示） |
+| items[].rule_name | string | 触发规则名称（`系统告警` 可为空） |
+| items[].product_key / device_key | string | 关联产品与设备标识（用于「详情」跳转 `/devices/{device_key}`） |
+| items[].status | string | 处理状态（未处理 / 已处理） |
+| items[].alarm_at | string | 告警时间 `yyyy-MM-dd HH:mm:ss` |
+
+> ⚠️ **依赖 E3**：本接口需要一张告警表（建议 `device_alarm`：`id / device_id / alarm_type / level / rule_id / rule_name / status / content / created_at / handled_at`），由 E3 规则引擎命中阈值时写入。
+> **不建议**复用 `device_log.log_type=5` —— 告警有独立的状态流转（未处理→已处理）与结构化字段，塞进 1024 字符的 `content` 会让筛选和统计都变成字符串解析。
+> **详情页跳转**：前端「详情」按钮直接跳 `/devices/{device_key}`，无需额外接口。
+
+---
+
+## 8. 设备事件记录（设备详情「事件记录」tab）
+
+> **背景**：`DeviceDetail.vue` 的「事件记录」tab 目前是占位空态。物模型里已有 `events` 定义（如 `high_temp_alarm` 高温告警），但**设备事件的上报 → 存储 → 查询整条链路都不存在**：MQTT topic `up/{device_key}/event` 已约定，`device_event` 表未建，EMQX 规则未配。
+
+### 8.1 事件上报接收（EMQX → Webhook）
+
+| 项 | 值 |
+|----|----|
+| 方法 | `POST` |
+| 路径 | `/api/v1/events` |
+| 调用方 | EMQX 规则引擎（新增规则，匹配 `up/+/event`） |
+
+**请求：**
+
+```json
+{
+  "device_key": "dev_demo_001",
+  "event_key": "high_temp_alarm",
+  "ts": 1724997600000,
+  "params": { "temperature": 58.2 }
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| device_key | string | 设备标识（规则取 MQTT `clientid`） |
+| event_key | string | 物模型 `events[].key` |
+| ts | long | 事件发生时间（毫秒时间戳） |
+| params | object | 事件参数（自由键值，对应物模型事件的输出参数） |
+
+**响应：** `{ "code": 0, "message": "ok" }`
+
+> 建议与遥测上报同构：**立即返回 200，异步落库**（D1 之后可复用 Kafka，topic `iot.event`）。需同步加进 JWT 拦截器放行清单（EMQX 无法携带 JWT）。
+
+### 8.2 事件查询
+
+| 项 | 值 |
+|----|----|
+| 方法 | `GET` |
+| 路径 | `/api/v1/devices/{device_key}/events?page=1&size=20&event_key=` |
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|:---:|------|
+| page / size | int | 否 | 分页（缺省 1 / 20） |
+| event_key | string | 否 | 按事件类型筛选（缺省全部） |
+
+**响应：**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "total": 3,
+    "items": [
+      {
+        "id": 12,
+        "event_key": "high_temp_alarm",
+        "event_name": "高温告警",
+        "type": "alert",
+        "params": { "temperature": 58.2 },
+        "ts": "2026-09-12 14:23:18"
+      }
+    ]
+  }
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| event_key | string | 物模型事件标识 |
+| event_name | string | 事件展示名（后端按产品 TSL 回填，前端不查 TSL） |
+| type | string | 事件类型：`info` / `alert` / `fault`（来自物模型 `events[].type`） |
+| params | object | 事件参数原文 |
+| ts | string | 事件时间 |
+
+---
+
+## 9. 实时推送（WebSocket，E2）
+
+> **背景**：当前 `DeviceDetail.vue` 用 `setInterval(loadLatest, 5000)` 轮询最新遥测。E2 的目标是把它换成服务端推送，**改造点只有这一处**（设备列表不轮询）。
+
+| 项 | 值 |
+|----|----|
+| 协议 | WebSocket |
+| 路径 | `ws://localhost:8080/ws/telemetry?token=<JWT>&device_key=<device_key>` |
+| 握手鉴权 | 复用 JWT（**查询参数传递**，浏览器 WS API 无法自定义 Header）；token 非法 → 服务端以 `4401` 关闭 |
+| 订阅粒度 | 单设备（`device_key`）；缺省订阅全部该用户可见设备 |
+
+**服务端 → 客户端（遥测推送）：**
+
+```json
+{
+  "type": "telemetry",
+  "device_key": "dev_demo_001",
+  "ts": 1724997600000,
+  "properties": { "temperature": 26.5, "humidity": 60.0 }
+}
+```
+
+**服务端 → 客户端（设备上下线）：**
+
+```json
+{ "type": "status", "device_key": "dev_demo_001", "online_status": 1, "at": "2026-09-12 19:15:46" }
+```
+
+**客户端 → 服务端（心跳）：** `{ "type": "ping" }` → 服务端回 `{ "type": "pong" }`
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| type | string | `telemetry` / `status` / `pong` / `error` |
+| properties | object | 同 §2 上报报文，属性键值对 |
+
+> **数据来源**：消费者侧（`TelemetryKafkaListener`）落库成功后，向该 topic 广播 —— 复用 D1 已有的 Kafka 链路，不新增数据通路。
+> **前端契约**：`src/api/ws.js` 负责连接、**心跳保活（约 30s）**、**断线重连（指数退避 + 上限）**；组件层只消费事件，不感知连接细节。
+> **验收标志（对齐任务清单 E2）**：切换设备后实时数据延迟 ≤ 1s；模拟断线 30s 内自动恢复；与 5s 轮询基线数据一致。
+
+---
+
+## 附 · 已实现接口索引（v1.3 之后落地，本节为补录）
+
+> 下列接口**已在代码中实现并运行**，v1.3 文档未收录。此处补录签名（报文细节以代码为准），恢复「本文档 = 接口单一事实源」。
+> ⚠️ 若与代码不一致，**以代码为准并回填本文档**。
+
+| 方法 | 路径 | 用途 | 引入 | 关键参数/响应 |
+|------|------|------|:---:|------|
+| GET | `/api/v1/devices` | 设备列表 | 3.3 | 新增 `online_status`（1 在线 / 2 离线，空或 0 不过滤） |
+| DELETE | `/api/v1/devices` | 批量删除设备 | 3.3 | body `{"device_keys":["dev_x",...]}`；级联清理遥测/日志/指令 + 清影子与 Redis 缓存；响应 `{"deleted":n}` |
+| GET | `/api/v1/devices/{device_key}/logs` | 设备操作日志（详情页「操作日志」tab） | 3.3 | `page`/`size`；`items[].log_type`（1 上线 2 下线 3 操作 4 指令 5 告警）+ `content` + `created_at` |
+| GET | `/api/v1/products` | 产品列表 | E5 | 响应 `items[]`：`product_key` / `name` / `protocol` / `data_format` / `node_type` / `tsl` / `created_at` |
+| POST | `/api/v1/products` | 新建产品 | E5 | body `{name, node_type?}`；自动生成 `product_key` |
+| GET | `/api/v1/products/{product_key}/tsl` | 产品物模型查询 | E5 | 返回 `{properties[], events[], services[]}` |
+| PUT | `/api/v1/products/{product_key}/tsl` | 保存物模型 | E5 | 校验：`type` ∈ int/float/bool/string/**enum**；`enum` 必须配 `elements[{value,key}]`；`access` ∈ readonly/readwrite；key 全局唯一且 `[A-Za-z0-9_]{1,64}`；**保存后失效影子 TSL 缓存** |
+| GET | `/api/v1/devices/{device_key}/shadow` | 设备影子三栏 | E1 | 返回 `desired` / `reported` / `delta` |
+| PUT | `/api/v1/devices/{device_key}/shadow/desired` | 设置期望值 | E1 | 离线时挂起，设备上线自动补发 |
+| DELETE | `/api/v1/devices/{device_key}/shadow` | 清除影子 | E1 | — |
+| GET | `/api/v1/devices/{device_key}/commands/pending` | 待下发指令队列 | E1 | `items[]` + `total` |
+| POST | `/api/v1/commands/ack` | 设备指令 ACK 回调 | M4 | EMQX 调用；**JWT 放行**；状态机 1→2/3 |
+| POST | `/api/v1/demo/reset` | 演示数据一键重置 | G5 | 清空遥测/日志/指令 + 硬删设备产品 + 重建演示基线（`p_demo_001` / `dev_demo_001`） |
+
+> ⚠️ **语义提醒（`9cc6213` 决策）**：**命令**（`POST /devices/{key}/commands`）在设备离线时**直接失败 `4005`**，不挂起；**期望值**（影子 desired）离线**挂起并上线补发**。两者语义已分家，勿混用。
+
