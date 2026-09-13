@@ -56,7 +56,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="resultVisible" title="注册成功" width="600px">
+    <el-dialog v-model="resultVisible" title="注册成功" width="640px">
       <el-alert
         type="warning"
         :closable="false"
@@ -64,9 +64,19 @@
         title="device_secret 仅本次显示，请立即保存！"
         description="设备连接 MQTT 时以 device_key 作为 ClientID/用户名、device_secret 作为密码，关闭后无法再查询。"
       />
-      <el-table :data="resultItems" size="small" max-height="320" style="margin-top: 12px">
-        <el-table-column prop="device_key" label="device_key" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="device_secret" label="device_secret" min-width="200" show-overflow-tooltip />
+      <div class="result-tools">
+        <el-button size="small" :icon="CopyDocument" @click="copyAll">复制全部</el-button>
+        <el-button size="small" :icon="Download" @click="exportSecrets">导出 CSV</el-button>
+        <span class="result-count">共 {{ resultItems.length }} 台</span>
+      </div>
+      <el-table :data="resultItems" size="small" max-height="320">
+        <el-table-column prop="device_key" label="device_key" min-width="170" show-overflow-tooltip />
+        <el-table-column prop="device_secret" label="device_secret" min-width="190" show-overflow-tooltip />
+        <el-table-column label="操作" width="80" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" text type="primary" @click="copyOne(row)">复制</el-button>
+          </template>
+        </el-table-column>
       </el-table>
       <template #footer>
         <el-button type="primary" @click="resultVisible = false">我已保存</el-button>
@@ -78,8 +88,10 @@
 <script setup>
 import { ref, reactive } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, CopyDocument, Download } from '@element-plus/icons-vue'
 import { registerDevice, registerBatch, listProducts } from '../api'
+import { downloadCsv } from '../utils/export'
+import { copyText } from '../utils/clipboard'
 
 const emit = defineEmits(['registered'])
 
@@ -101,6 +113,30 @@ const form = reactive({
   count: 10
 })
 const resultItems = ref([])
+
+/** 复制单行：device_key + device_secret 以制表符分隔，可直接粘进 Excel 分列 */
+async function copyOne(row) {
+  const ok = await copyText(`${row.device_key}\t${row.device_secret}`)
+  if (ok) ElMessage.success('已复制 key 与 secret')
+  else ElMessage.error('复制失败，请手动选中复制')
+}
+
+async function copyAll() {
+  const text = resultItems.value.map((r) => `${r.device_key}\t${r.device_secret}`).join('\n')
+  const ok = await copyText(text)
+  if (ok) ElMessage.success(`已复制 ${resultItems.value.length} 台设备的 key 与 secret`)
+  else ElMessage.error('复制失败，请改用「导出 CSV」')
+}
+
+function exportSecrets() {
+  if (!resultItems.value.length) return
+  downloadCsv(
+    `device_secrets_${new Date().toISOString().slice(0, 10)}.csv`,
+    ['device_key', 'device_secret'],
+    resultItems.value
+  )
+  ElMessage.success(`已导出 ${resultItems.value.length} 条凭据`)
+}
 
 async function loadProducts() {
   try {
@@ -179,6 +215,19 @@ defineExpose({ openDialog })
 
 .device-register.inline {
   margin-bottom: 0;
+}
+
+.result-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 8px;
+}
+
+.result-count {
+  margin-left: auto;
+  font-size: 12px;
+  color: #9ca3af;
 }
 
 .register-btn {
