@@ -25,10 +25,13 @@
             <el-icon><Odometer /></el-icon>
             <span>设备</span>
           </el-menu-item>
+          <!-- 产品分类：页面尚为占位（E4 分组管理阶段落地），先不放出菜单，避免「点进去只有规划中」的死链体验 -->
+          <!--
           <el-menu-item index="/categories">
             <el-icon><FolderOpened /></el-icon>
             <span>产品分类</span>
           </el-menu-item>
+          -->
         </el-sub-menu>
         <el-sub-menu index="ops">
           <template #title>
