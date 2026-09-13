@@ -57,7 +57,11 @@ const rules = {
 }
 
 async function handleLogin() {
-  await formRef.value.validate()
+  try {
+    await formRef.value.validate()
+  } catch {
+    return   // 校验失败：Element 已在表单内联提示，这里只需中断提交
+  }
   loading.value = true
   try {
     const res = await login(form.username, form.password)
@@ -83,7 +87,7 @@ async function handleLogin() {
 }
 
 .login-card {
-  width: 400px;
+  width: min(400px, calc(100vw - 32px));
   background: #fff;
   border-radius: 14px;
   padding: 40px 36px 28px;
