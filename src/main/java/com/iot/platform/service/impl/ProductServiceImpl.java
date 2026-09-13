@@ -28,9 +28,10 @@ import java.util.stream.Collectors;
  * <p>TSL 校验口径（与前端渲染逻辑对齐）：
  * <ul>
  *   <li>{@code properties} 必须是数组（可为空）；{@code services}/{@code events} 可缺省；</li>
- *   <li>属性 {@code type} 仅允许 int/float/bool/string —— HistoryChart 只给 int/float 画曲线，
- *       ControlPanel 按类型生成控件；</li>
+ *   <li>属性 {@code type} 仅允许 int/float/bool/string/enum —— HistoryChart 只给 int/float 画曲线，
+ *       ControlPanel 按类型生成控件（enum 用下拉、数值用步长）；</li>
  *   <li>属性 {@code access} 仅允许 readonly/readwrite —— readwrite 才会渲染下发控件；</li>
+ *   <li>type=enum 的属性必须配置 {@code elements}（[{value, key}] 枚举项列表，key 为展示文本）；</li>
  *   <li>所有 key 全局（三段内）唯一、仅允许字母/数字/下划线（key 会进入 Redis 影子 field 与 MQTT 报文）。</li>
  * </ul>
  */
@@ -45,7 +46,7 @@ public class ProductServiceImpl implements ProductService {
     private final ObjectMapper objectMapper;
 
     private static final SecureRandom RANDOM = new SecureRandom();
-    private static final Set<String> ALLOWED_TYPES = Set.of("int", "float", "bool", "string");
+    private static final Set<String> ALLOWED_TYPES = Set.of("int", "float", "bool", "string", "enum");
     private static final Set<String> ALLOWED_ACCESS = Set.of("readonly", "readwrite");
     /** MVP 单演示项目（seed id=1）：新建产品缺省挂到这里 */
     private static final long DEFAULT_PROJECT_ID = 1L;
@@ -177,7 +178,21 @@ public class ProductServiceImpl implements ProductService {
                     String type = str(item.get("type"));
                     if (!ALLOWED_TYPES.contains(type)) {
                         throw new BizException(ErrorCode.PARAM_ERROR,
-                                at + ".type 仅允许 int/float/bool/string，实际: " + type);
+                                at + ".type 仅允许 int/float/bool/string/enum，实际: " + type);
+                    }
+                    if ("enum".equals(type)) {
+                        Object elems = item.get("elements");
+                        if (!(elems instanceof List) || ((List<?>) elems).isEmpty()) {
+                            throw new BizException(ErrorCode.PARAM_ERROR,
+                                    at + ".type=enum 时必须配置 elements 枚举项");
+                        }
+                        for (Object e : (List<?>) elems) {
+                            if (!(e instanceof Map) || ((Map<?, ?>) e).get("value") == null
+                                    || str(((Map<?, ?>) e).get("key")).isBlank()) {
+                                throw new BizException(ErrorCode.PARAM_ERROR,
+                                        at + ".elements 每项需含 value 与 key（key 为展示文本）");
+                            }
+                        }
                     }
                     String access = str(item.get("access"));
                     if (access == null) {
