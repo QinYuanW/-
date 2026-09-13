@@ -1,98 +1,73 @@
 <template>
   <div class="products-page">
-    <header class="topbar">
-      <div class="brand">
-        <div class="brand-logo">
-          <el-icon :size="18"><Box /></el-icon>
-        </div>
-        <span>产品与物模型</span>
+    <div class="products-head">
+      <div class="products-title">
+        <span>产品</span>
+        <el-tag size="small" type="info" effect="plain">{{ products.length }} 个</el-tag>
       </div>
-      <div class="topbar-right">
-        <el-button text @click="$router.push('/')">← 返回控制台</el-button>
-      </div>
-    </header>
-
-    <div class="layout">
-      <section class="panel left">
-        <div class="panel-head">
-          <span>产品列表</span>
-          <el-button type="primary" size="small" :icon="Plus" @click="openCreate">新建产品</el-button>
-        </div>
-        <el-table
-          :data="products"
-          v-loading="loading"
-          highlight-current-row
-          size="small"
-          @current-change="handleSelect"
-        >
-          <el-table-column prop="product_key" label="product_key" min-width="130" show-overflow-tooltip />
-          <el-table-column prop="name" label="名称" min-width="110" show-overflow-tooltip />
-          <el-table-column label="属性数" width="70">
-            <template #default="{ row }">{{ (row.tsl?.properties || []).length }}</template>
-          </el-table-column>
-        </el-table>
-        <p class="hint">选中产品后，右侧可编辑它的物模型。设备控制台按这里的 TSL 自动生成卡片与控件。</p>
-      </section>
-
-      <section class="panel right" v-if="selected">
-        <div class="panel-head">
-          <span>物模型 · {{ selected.name }}（{{ selected.product_key }}）</span>
-          <el-button type="primary" size="small" :loading="saving" @click="save">保存物模型</el-button>
-        </div>
-
-        <h4 class="sec-title">属性 properties</h4>
-        <el-table :data="properties" size="small">
-          <el-table-column label="key" min-width="120">
-            <template #default="{ row }"><el-input v-model="row.key" size="small" placeholder="temperature" /></template>
-          </el-table-column>
-          <el-table-column label="名称" min-width="100">
-            <template #default="{ row }"><el-input v-model="row.name" size="small" placeholder="温度" /></template>
-          </el-table-column>
-          <el-table-column label="类型" width="100">
-            <template #default="{ row }">
-              <el-select v-model="row.type" size="small">
-                <el-option v-for="t in types" :key="t" :value="t" :label="t" />
-              </el-select>
-            </template>
-          </el-table-column>
-          <el-table-column label="单位" width="90">
-            <template #default="{ row }"><el-input v-model="row.unit" size="small" placeholder="℃" /></template>
-          </el-table-column>
-          <el-table-column label="读写" width="110">
-            <template #default="{ row }">
-              <el-select v-model="row.access" size="small">
-                <el-option value="readonly" label="readonly 只读" />
-                <el-option value="readwrite" label="readwrite 可写" />
-              </el-select>
-            </template>
-          </el-table-column>
-          <el-table-column label="" width="60">
-            <template #default="{ $index }">
-              <el-button size="small" text type="danger" @click="properties.splice($index, 1)">删除</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-        <el-button size="small" class="add-btn" @click="addProperty">+ 加一个属性</el-button>
-
-        <h4 class="sec-title">事件 events / 服务 services（JSON）</h4>
-        <div class="json-row">
-          <div>
-            <p class="json-label">events</p>
-            <el-input v-model="eventsJson" type="textarea" :rows="4" />
-          </div>
-          <div>
-            <p class="json-label">services</p>
-            <el-input v-model="servicesJson" type="textarea" :rows="4" />
-          </div>
-        </div>
-        <p class="hint">保存时会校验：key 全局唯一且仅字母/数字/下划线；type 仅 int/float/bool/string；access 仅 readonly/readwrite。</p>
-      </section>
-
-      <section class="panel right empty" v-else>
-        <p class="muted-empty">← 先在左侧选中一个产品</p>
-      </section>
     </div>
 
+    <div class="toolbar">
+      <el-input
+        v-model="productSearch"
+        class="tool-search"
+        placeholder="搜索产品名称 / product_key"
+        clearable
+        :prefix-icon="Search"
+      />
+      <div class="tool-spacer" />
+      <el-button type="primary" :icon="Plus" @click="openCreate">新建产品</el-button>
+    </div>
+
+    <div class="card-scroll">
+      <div v-loading="loading" class="card-grid">
+        <div
+          v-for="p in filteredProducts"
+          :key="p.product_key"
+          class="product-card"
+          @click="goDetail(p)"
+        >
+          <div class="card-top">
+            <div class="icon-box"><el-icon><Goods /></el-icon></div>
+            <div class="name-box">
+              <div class="prod-name">{{ p.name }}</div>
+              <div class="status-line">
+                <span class="tag" :title="p.product_key">{{ p.product_key }}</span>
+                <span class="tag soft">{{ nodeTypeTextOf(p) }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card-meta">
+            <div class="meta-item">
+              <span>接入协议</span>
+              <b>{{ p.protocol || 'MQTT' }}</b>
+            </div>
+            <div class="meta-item">
+              <span>数据格式</span>
+              <b>{{ p.data_format || 'JSON' }}</b>
+            </div>
+            <div class="meta-item">
+              <span>物模型规模</span>
+              <b>{{ (p.tsl?.properties || []).length }} 属性 · {{ (p.tsl?.events || []).length }} 事件 · {{ (p.tsl?.services || []).length }} 服务</b>
+            </div>
+            <div class="meta-item">
+              <span>创建时间</span>
+              <b>{{ formatTime(p.created_at) }}</b>
+            </div>
+          </div>
+
+          <div class="card-actions">
+            <button class="action" @click.stop="goDetail(p)">查看详情</button>
+            <i class="divider"></i>
+            <button class="action" @click.stop="goDevices(p)">设备列表</button>
+          </div>
+        </div>
+        <el-empty v-if="!loading && !filteredProducts.length" description="暂无产品" :image-size="80" class="cards-empty" />
+      </div>
+    </div>
+
+    <!-- 新建产品 -->
     <el-dialog v-model="createVisible" title="新建产品" width="460px">
       <el-form label-width="100px">
         <el-form-item label="产品名称" required>
@@ -112,37 +87,42 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Plus, Box } from '@element-plus/icons-vue'
-import { listProducts, createProduct, getProductTsl, updateProductTsl } from '../api'
+import { Plus, Search, Goods } from '@element-plus/icons-vue'
+import { listProducts, createProduct } from '../api'
+import { formatTime } from '../utils/export'
 
-const types = ['int', 'float', 'bool', 'string']
+const router = useRouter()
 
 const products = ref([])
 const loading = ref(false)
-const selected = ref(null)
-const saving = ref(false)
-
-const properties = ref([])
-const eventsJson = ref('[]')
-const servicesJson = ref('[]')
+const productSearch = ref('')
 
 const createVisible = ref(false)
 const creating = ref(false)
 const createForm = reactive({ name: '', product_key: '' })
 
-// 选中的产品引用（用于保存时定位 product_key）
-const selectedKey = computed(() => selected.value?.product_key)
+const filteredProducts = computed(() => {
+  const kw = productSearch.value.trim().toLowerCase()
+  if (!kw) return products.value
+  return products.value.filter(
+    (p) =>
+      String(p.name || '').toLowerCase().includes(kw) ||
+      String(p.product_key || '').toLowerCase().includes(kw)
+  )
+})
+
+function nodeTypeTextOf(p) {
+  const m = { 1: '直连设备', 2: '网关设备', 3: '子设备' }
+  return m[p.node_type] || '直连设备'
+}
 
 async function load() {
   loading.value = true
   try {
     const res = await listProducts()
     products.value = res.data.items || []
-    // 保持选中态：刷新后按 product_key 找回
-    if (selectedKey.value) {
-      selected.value = products.value.find((p) => p.product_key === selectedKey.value) || null
-    }
   } catch (e) {
     // 拦截器已提示
   } finally {
@@ -150,56 +130,12 @@ async function load() {
   }
 }
 
-function handleSelect(row) {
-  selected.value = row || null
-  if (row) loadTsl(row.product_key)
+function goDetail(p) {
+  router.push(`/products/${p.product_key}`)
 }
 
-async function loadTsl(productKey) {
-  try {
-    const res = await getProductTsl(productKey)
-    const tsl = res.data || {}
-    properties.value = (tsl.properties || []).map((p) => ({ ...p }))
-    eventsJson.value = JSON.stringify(tsl.events || [], null, 2)
-    servicesJson.value = JSON.stringify(tsl.services || [], null, 2)
-  } catch (e) {
-    properties.value = []
-  }
-}
-
-function addProperty() {
-  properties.value.push({ key: '', name: '', type: 'float', unit: '', access: 'readonly' })
-}
-
-function buildTsl() {
-  let events, services
-  try {
-    events = JSON.parse(eventsJson.value || '[]')
-    services = JSON.parse(servicesJson.value || '[]')
-  } catch (e) {
-    ElMessage.error('events / services 不是合法 JSON')
-    return null
-  }
-  return {
-    properties: properties.value.filter((p) => String(p.key || '').trim() !== ''),
-    events,
-    services
-  }
-}
-
-async function save() {
-  const tsl = buildTsl()
-  if (!tsl) return
-  saving.value = true
-  try {
-    await updateProductTsl(selectedKey.value, tsl)
-    ElMessage.success('物模型已保存，控制台界面将按新 TSL 自动更新')
-    await load()
-  } catch (e) {
-    // 校验错误信息由后端返回、拦截器已提示
-  } finally {
-    saving.value = false
-  }
+function goDevices(p) {
+  router.push(`/products/${p.product_key}?tab=devices`)
 }
 
 function openCreate() {
@@ -233,92 +169,212 @@ onMounted(load)
 
 <style scoped>
 .products-page {
-  min-height: 100vh;
+  height: 100%;
   display: flex;
   flex-direction: column;
+  gap: 12px;
+  padding: 16px 24px;
+  overflow: hidden;
 }
-.topbar {
-  height: 52px;
-  background: #fff;
-  border-bottom: 1px solid #e4e7ed;
+
+.products-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 18px;
 }
-.brand {
+
+.products-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f2937;
   display: flex;
   align-items: center;
   gap: 8px;
-  font-weight: 600;
 }
-.brand-logo {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  background: #409eff;
-  color: #fff;
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tool-search {
+  width: 280px;
+}
+
+.tool-spacer {
+  flex: 1;
+}
+
+.card-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+
+.product-card {
+  position: relative;
+  background: #fff;
+  border: 1px solid #eef1f6;
+  border-radius: 10px;
+  padding: 14px;
+  transition: box-shadow 0.25s, transform 0.25s, border-color 0.25s;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.product-card:hover {
+  box-shadow: 0 6px 18px rgba(31, 41, 55, 0.08);
+  transform: translateY(-2px);
+  border-color: #c7d8f0;
+}
+
+.card-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.icon-box {
+  width: 46px;
+  height: 46px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-}
-.layout {
-  flex: 1;
-  display: flex;
-  gap: 12px;
-  padding: 12px;
-  align-items: flex-start;
-}
-.panel {
-  background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 8px;
-  padding: 12px;
-}
-.left {
-  width: 380px;
+  font-size: 22px;
+  color: #fff;
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
   flex-shrink: 0;
 }
-.right {
+
+.name-box {
   flex: 1;
+  min-width: 0;
 }
-.panel-head {
+
+.prod-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2937;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status-line {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-  font-weight: 600;
+  gap: 6px;
+  margin-top: 6px;
+  min-width: 0;
 }
-.sec-title {
-  margin: 14px 0 8px;
-  font-size: 13px;
-  color: #606266;
+
+.tag {
+  font-size: 11px;
+  background: #eff6ff;
+  color: #2563eb;
+  padding: 1px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60%;
 }
-.add-btn {
-  margin-top: 8px;
-  width: 100%;
+
+.tag.soft {
+  background: #f3f4f6;
+  color: #6b7280;
 }
-.json-row {
+
+.card-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+  padding: 10px 12px;
+  background: #fafbfc;
+  border-radius: 8px;
+}
+
+.meta-item {
   display: flex;
-  gap: 12px;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
-.json-row > div {
+
+.meta-item span {
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+.meta-item b {
+  font-size: 12px;
+  font-weight: 500;
+  color: #374151;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-actions {
+  display: flex;
+  align-items: center;
+  border-top: 1px solid #f0f2f5;
+  padding-top: 10px;
+}
+
+.action {
   flex: 1;
+  border: none;
+  background: none;
+  font-size: 13px;
+  color: #6b7280;
+  cursor: pointer;
+  padding: 4px 0;
+  transition: color 0.2s;
 }
-.json-label {
-  font-size: 12px;
-  color: #909399;
-  margin-bottom: 4px;
+
+.action:hover {
+  color: #2563eb;
 }
-.hint {
-  margin-top: 10px;
-  font-size: 12px;
-  color: #909399;
-  line-height: 1.6;
+
+.divider {
+  width: 1px;
+  height: 14px;
+  background: #e5eaf2;
 }
-.muted-empty {
-  color: #909399;
-  text-align: center;
-  padding: 60px 0;
+
+.cards-empty {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 1200px) {
+  .card-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 900px) {
+  .products-page {
+    padding: 12px;
+  }
+
+  .card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tool-search {
+    width: 100%;
+  }
 }
 </style>

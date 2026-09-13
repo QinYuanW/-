@@ -1,231 +1,336 @@
 <template>
   <div class="console">
-    <header class="topbar">
-      <div class="brand">
-        <div class="brand-logo">
-          <el-icon :size="18"><Connection /></el-icon>
-        </div>
-        <span>物联网 PaaS 控制台</span>
+    <div class="console-head">
+      <div class="console-title">
+        <span>设备控制台</span>
+        <el-tag size="small" type="info" effect="plain">{{ total }} 台</el-tag>
       </div>
-      <div class="topbar-right">
-        <el-button text @click="$router.push('/products')">产品与物模型</el-button>
-        <span class="user">
-          <el-icon><UserFilled /></el-icon>
-          {{ username }}
-        </span>
-        <el-button text @click="handleLogout">退出登录</el-button>
-      </div>
-    </header>
-
-    <div class="layout">
-      <aside class="sidebar">
-        <DeviceRegister @registered="loadDevices" />
-        <div class="sidebar-list">
-          <DeviceList
-            :devices="devices"
-            :selected-key="selectedKey"
-            :loading="deviceLoading"
-            :total="total"
-            :page="page"
-            :size="size"
-            :products="products"
-            @select="handleSelect"
-            @search="handleSearch"
-            @page-change="handlePageChange"
-            @filter="handleFilter"
-          />
-        </div>
-      </aside>
-
-      <main class="main">
-        <template v-if="selectedKey">
-          <!-- 物模型说明 -->
-          <div class="panel tsl-banner">
-            <div class="panel-title">
-              物模型驱动 · 界面按 TSL 自动生成
-              <el-tag size="small" type="info" effect="plain" style="margin-left: 8px">
-                {{ selectedKey }}
-              </el-tag>
-            </div>
-            <div class="tsl-rule">
-              <span><b class="c-readonly">readonly</b> → 数据卡片</span>
-              <span><b class="c-readwrite">readwrite</b> → 卡片 + 控件</span>
-              <span><b class="c-service">services</b> → 服务按钮</span>
-              <span class="muted">新增传感器/控制项只需改产品 TSL，前端零改动</span>
-            </div>
-          </div>
-
-          <!-- 最新遥测卡片 -->
-          <div class="panel">
-            <div class="panel-title">
-              {{ selectedName }} · 最新数据
-              <span class="online-dot" :class="online ? 'on' : ''"></span>
-              <span class="online-text">{{ online ? '在线' : '离线' }}</span>
-            </div>
-            <MetricCards :tsl="tsl" :telemetry="latest" :loading="telemetryLoading" />
-          </div>
-
-          <div class="main-grid">
-            <div class="panel">
-              <div class="panel-title">历史曲线</div>
-              <HistoryChart
-                :device-key="selectedKey"
-                :tsl="tsl"
-                :telemetry="latest"
-              />
-            </div>
-            <div class="panel">
-              <div class="panel-title">下发控制</div>
-              <ControlPanel
-                :device-key="selectedKey"
-                :tsl="tsl"
-                :telemetry="latest"
-                @executed="handleExecuted"
-              />
-            </div>
-          </div>
-
-          <!-- E1 设备影子：期望值 / 上报值 / 差异 + 离线指令队列 -->
-          <div class="panel">
-            <div class="panel-title">
-              设备影子 · 期望值 / 上报值 / 差异
-              <el-tag size="small" type="success" effect="plain" style="margin-left: 8px">E1</el-tag>
-            </div>
-            <ShadowPanel :device-key="selectedKey" :tsl="tsl" />
-          </div>
-        </template>
-
-        <el-empty v-else description="请选择左侧设备" />
-      </main>
     </div>
+
+    <div class="stats-bar">
+      <div class="stat-card">
+        <div class="stat-icon total"><el-icon><Connection /></el-icon></div>
+        <div class="stat-body">
+          <div class="stat-num">{{ stats.total }}</div>
+          <div class="stat-label">设备总数</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon online"><el-icon><CircleCheck /></el-icon></div>
+        <div class="stat-body">
+          <div class="stat-num online-num">{{ stats.online }}</div>
+          <div class="stat-label">在线设备</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon offline"><el-icon><CircleClose /></el-icon></div>
+        <div class="stat-body">
+          <div class="stat-num offline-num">{{ stats.offline }}</div>
+          <div class="stat-label">离线设备</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon product"><el-icon><Goods /></el-icon></div>
+        <div class="stat-body">
+          <div class="stat-num">{{ stats.products }}</div>
+          <div class="stat-label">产品总数</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <el-input
+        v-model="keyword"
+        class="tool-search"
+        placeholder="搜索 device_key / 名称"
+        clearable
+        :prefix-icon="Search"
+        @keyup.enter="handleSearch"
+        @clear="handleSearch"
+      />
+      <el-select v-model="statusFilter" class="tool-select" placeholder="全部状态" @change="handleFilter">
+        <el-option label="全部状态" :value="0" />
+        <el-option label="在线" :value="1" />
+        <el-option label="离线" :value="2" />
+      </el-select>
+      <el-select
+        v-model="productKey"
+        class="tool-select wide"
+        clearable
+        placeholder="按产品筛选"
+        @change="handleFilter"
+      >
+        <el-option
+          v-for="p in products"
+          :key="p.product_key"
+          :label="`${p.name}（${p.product_key}）`"
+          :value="p.product_key"
+        />
+      </el-select>
+
+      <div class="tool-spacer" />
+
+      <el-radio-group v-model="viewMode" size="small" class="view-toggle">
+        <el-radio-button value="card">
+          <el-icon><Grid /></el-icon>
+          <span class="toggle-label">卡片</span>
+        </el-radio-button>
+        <el-radio-button value="list">
+          <el-icon><List /></el-icon>
+          <span class="toggle-label">列表</span>
+        </el-radio-button>
+      </el-radio-group>
+
+      <el-button type="primary" :icon="Plus" @click="registerRef?.openDialog()">注册设备</el-button>
+      <el-dropdown @command="handleBatchAction">
+        <el-button :disabled="!selectedKeys.length" :icon="Operation">
+          批量操作{{ selectedKeys.length ? `（${selectedKeys.length}）` : '' }}
+        </el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="delete" :disabled="!selectedKeys.length">批量删除</el-dropdown-item>
+            <el-dropdown-item command="export" :disabled="!selectedKeys.length">导出选中</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+      <el-button :icon="Download" @click="handleExportAll">导出全部</el-button>
+      <el-button :icon="Tickets" @click="batchListRef?.open()">批次列表</el-button>
+      <el-button :icon="RefreshLeft" @click="handleDemoReset">演示重置</el-button>
+    </div>
+
+    <DeviceCards
+      v-if="viewMode === 'card'"
+      ref="listRef"
+      :devices="devices"
+      :loading="loading"
+      :total="total"
+      :page="page"
+      :size="size"
+      :products="products"
+      @select="handleSelect"
+      @page-change="handlePageChange"
+      @size-change="handleSizeChange"
+      @selection-change="handleSelectionChange"
+    />
+    <DeviceList
+      v-else
+      ref="listRef"
+      :devices="devices"
+      :loading="loading"
+      :total="total"
+      :page="page"
+      :size="size"
+      :products="products"
+      @select="handleSelect"
+      @page-change="handlePageChange"
+      @size-change="handleSizeChange"
+      @selection-change="handleSelectionChange"
+    />
+
+    <DeviceRegister ref="registerRef" :show-button="false" @registered="loadDevices" />
+    <BatchListDialog ref="batchListRef" />
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Search, Plus, Operation, Download, Tickets, RefreshLeft, Grid, List } from '@element-plus/icons-vue'
+import { listDevices, listProducts, deleteDevices, demoReset } from '../api'
+import { downloadCsv, formatTime } from '../utils/export'
+import DeviceCards from '../components/DeviceCards.vue'
 import DeviceList from '../components/DeviceList.vue'
 import DeviceRegister from '../components/DeviceRegister.vue'
-import MetricCards from '../components/MetricCards.vue'
-import HistoryChart from '../components/HistoryChart.vue'
-import ControlPanel from '../components/ControlPanel.vue'
-import ShadowPanel from '../components/ShadowPanel.vue'
-import { listDevices, getTsl, getLatestTelemetry, listProducts } from '../api'
+import BatchListDialog from '../components/BatchListDialog.vue'
 
 const router = useRouter()
-const username = localStorage.getItem('iot_username') || 'admin'
 
 const devices = ref([])
-const selectedKey = ref('')
-const selectedName = ref('')
-const deviceLoading = ref(false)
+const products = ref([])
+const loading = ref(false)
 const page = ref(1)
 const size = ref(20)
 const total = ref(0)
 const keyword = ref('')
-// E5：产品筛选与产品列表（供设备列表显示产品名 / 按产品过滤）
-const products = ref([])
+const statusFilter = ref(0)
 const productKey = ref('')
+const selectedKeys = ref([])
+const viewMode = ref('card')
+const stats = ref({ total: 0, online: 0, offline: 0, products: 0 })
 
-const tsl = ref(null)
-const latest = ref({})
-const telemetryLoading = ref(false)
+const listRef = ref()
+const registerRef = ref()
+const batchListRef = ref()
 
-const online = computed(() => {
-  const dev = devices.value.find((d) => d.device_key === selectedKey.value)
-  return dev ? dev.online_status === 1 : false
-})
-
-let pollTimer = null
+const EXPORT_LIMIT = 5000
 
 async function loadDevices() {
-  deviceLoading.value = true
+  loading.value = true
   try {
-    const res = await listDevices(page.value, size.value, keyword.value, productKey.value)
+    const res = await listDevices(page.value, size.value, keyword.value, productKey.value, statusFilter.value)
     devices.value = res.data.items || []
     total.value = res.data.total || 0
-    if (!selectedKey.value && devices.value.length) {
-      handleSelect(devices.value[0])
-    }
+  } catch (e) {
+    devices.value = []
   } finally {
-    deviceLoading.value = false
+    loading.value = false
   }
 }
 
 async function loadProducts() {
   try {
     products.value = (await listProducts()).data.items || []
-  } catch (e) {
+  } catch {
     products.value = []
   }
 }
 
-function handleSearch(kw) {
-  keyword.value = kw
+// JetLinks/FastBee 式统计卡片：设备总数/在线/离线/产品数（复用现有分页接口取 total）
+async function loadStats() {
+  try {
+    const [all, online, offline, prods] = await Promise.all([
+      listDevices(1, 1),
+      listDevices(1, 1, '', '', 1),
+      listDevices(1, 1, '', '', 2),
+      listProducts()
+    ])
+    stats.value = {
+      total: all.data.total || 0,
+      online: online.data.total || 0,
+      offline: offline.data.total || 0,
+      products: (prods.data.items || []).length
+    }
+  } catch {
+    // 统计失败不阻塞页面
+  }
+}
+
+function handleSearch() {
   page.value = 1
   loadDevices()
 }
 
-function handleFilter(pk) {
-  productKey.value = pk
+function handleFilter() {
   page.value = 1
+  listRef.value?.clearSelection()
+  selectedKeys.value = []
   loadDevices()
 }
 
 function handlePageChange(p) {
   page.value = p
+  listRef.value?.clearSelection()
+  selectedKeys.value = []
   loadDevices()
 }
 
-async function handleSelect(device) {
-  selectedKey.value = device.device_key
-  selectedName.value = device.device_name || device.device_key
-  await Promise.all([loadTsl(), loadLatest()])
+function handleSizeChange(s) {
+  size.value = s
+  page.value = 1
+  listRef.value?.clearSelection()
+  selectedKeys.value = []
+  loadDevices()
 }
 
-async function loadTsl() {
-  try {
-    const res = await getTsl(selectedKey.value)
-    tsl.value = res.data
-  } catch (e) {
-    tsl.value = null
+function handleSelectionChange(rows) {
+  selectedKeys.value = rows.map((r) => r.device_key)
+}
+
+function handleSelect(device) {
+  router.push(`/devices/${device.device_key}`)
+}
+
+async function handleBatchAction(command) {
+  if (command === 'delete') {
+    await doDelete(selectedKeys.value)
+  } else if (command === 'export') {
+    exportRows(devices.value.filter((d) => selectedKeys.value.includes(d.device_key)))
   }
 }
 
-async function loadLatest() {
-  telemetryLoading.value = true
+async function doDelete(keys) {
+  if (!keys.length) return
+  await ElMessageBox.confirm(
+    `将删除 ${keys.length} 台设备（遥测、日志、指令、影子一并清理），此操作不可恢复。确定继续吗？`,
+    '批量删除',
+    { type: 'warning', confirmButtonText: '删除', confirmButtonClass: 'el-button--danger' }
+  )
   try {
-    const res = await getLatestTelemetry(selectedKey.value)
-    latest.value = res.data || {}
+    const res = await deleteDevices(keys)
+    ElMessage.success(`已删除 ${res.data.deleted} 台设备`)
+    listRef.value?.clearSelection()
+    selectedKeys.value = []
+    loadDevices()
   } catch (e) {
-    latest.value = {}
-  } finally {
-    telemetryLoading.value = false
+    // 拦截器已提示
   }
 }
 
-function handleExecuted({ key, value }) {
-  latest.value = { ...latest.value, [key]: value }
+async function fetchAllForExport() {
+  const all = []
+  let p = 1
+  while (all.length < EXPORT_LIMIT) {
+    const res = await listDevices(p, 100, keyword.value, productKey.value, statusFilter.value)
+    const items = res.data.items || []
+    all.push(...items)
+    if (all.length >= (res.data.total || 0)) break
+    p += 1
+  }
+  return all
 }
 
-async function handleLogout() {
-  await ElMessageBox.confirm('确定退出登录吗？', '提示', { type: 'warning' })
-  localStorage.removeItem('iot_token')
-  localStorage.removeItem('iot_username')
-  router.push('/login')
+async function handleExportAll() {
+  try {
+    const rows = await fetchAllForExport()
+    exportRows(rows)
+  } catch (e) {
+    // 拦截器已提示
+  }
+}
+
+function exportRows(rows) {
+  if (!rows.length) {
+    ElMessage.warning('没有可导出的设备')
+    return
+  }
+  const productNameOf = (key) => products.value.find((x) => x.product_key === key)?.name || key || ''
+  downloadCsv(
+    `devices_${new Date().toISOString().slice(0, 10)}.csv`,
+    ['device_key', 'device_name', 'product_key', 'product_name', 'online_status', 'last_online_at'],
+    rows.map((d) => ({
+      device_key: d.device_key,
+      device_name: d.device_name,
+      product_key: d.product_key,
+      product_name: productNameOf(d.product_key),
+      online_status: d.online_status === 1 ? '在线' : '离线',
+      last_online_at: formatTime(d.last_online_at)
+    }))
+  )
+  ElMessage.success(`已导出 ${rows.length} 台设备`)
+}
+
+async function handleDemoReset() {
+  await ElMessageBox.confirm(
+    '将清空全部遥测/日志/指令数据，删除所有设备与产品，并重建演示基线（p_demo_001 + dev_demo_001）。确定继续吗？',
+    '演示数据一键重置',
+    { type: 'warning', confirmButtonText: '重置', confirmButtonClass: 'el-button--danger' }
+  )
+  try {
+    await demoReset()
+    ElMessage.success('演示数据已重置，回到初始基线')
+    page.value = 1
+    selectedKeys.value = []
+    await Promise.all([loadDevices(), loadProducts(), loadStats()])
+  } catch (e) {
+    // 拦截器已提示
+  }
 }
 
 onMounted(() => {
   loadDevices()
   loadProducts()
-  pollTimer = setInterval(() => {
-    if (selectedKey.value) loadLatest()
-  }, 5000)
-})
-
-onBeforeUnmount(() => {
-  if (pollTimer) clearInterval(pollTimer)
+  loadStats()
 })
 </script>
 
@@ -234,147 +339,139 @@ onBeforeUnmount(() => {
   height: 100%;
   display: flex;
   flex-direction: column;
+  gap: 12px;
+  padding: 16px 24px;
+  overflow: hidden;
 }
 
-.topbar {
-  height: 56px;
-  background: #fff;
-  border-bottom: 1px solid #e5eaf2;
+.console-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 24px;
-  flex-shrink: 0;
 }
 
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.console-title {
   font-size: 16px;
   font-weight: 600;
   color: #1f2937;
-}
-
-.brand-logo {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
-  color: #fff;
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 8px;
 }
 
-.topbar-right {
+.stats-bar {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.stat-card {
+  background: #fff;
+  border: 1px solid #e4e9f0;
+  border-radius: var(--radius-md, 10px);
+  padding: 14px 16px;
   display: flex;
   align-items: center;
   gap: 12px;
 }
 
-.user {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: #4b5563;
-}
-
-.layout {
-  flex: 1;
-  display: grid;
-  grid-template-columns: 280px 1fr;
-  gap: 16px;
-  padding: 16px 24px;
-  min-height: 0;
-}
-
-.sidebar {
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.sidebar-list {
-  flex: 1;
-  min-height: 0;
-}
-
-.main {
-  min-height: 0;
-  overflow-y: auto;
-}
-
-.panel {
-  background: #fff;
-  border: 1px solid #e5eaf2;
+.stat-icon {
+  width: 40px;
+  height: 40px;
   border-radius: 10px;
-  padding: 16px;
-  margin-bottom: 16px;
-}
-
-.panel-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: #1f2937;
-  margin-bottom: 14px;
   display: flex;
   align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  color: #fff;
+  flex-shrink: 0;
 }
 
-.tsl-banner {
-  background: linear-gradient(135deg, #f8fbff, #fff);
+.stat-icon.total {
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
 }
 
-.tsl-rule {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 18px;
-  font-size: 12px;
-  color: #4b5563;
+.stat-icon.online {
+  background: linear-gradient(135deg, #10b981, #059669);
 }
 
-.tsl-rule .muted {
-  color: #9ca3af;
+.stat-icon.offline {
+  background: linear-gradient(135deg, #9ca3af, #6b7280);
 }
 
-.c-readonly {
-  color: #2563eb;
+.stat-icon.product {
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
 }
 
-.c-readwrite {
-  color: #d97706;
+.stat-num {
+  font-size: 22px;
+  font-weight: 700;
+  color: #1f2937;
+  line-height: 1.1;
 }
 
-.c-service {
-  color: #16a34a;
+.stat-num.online-num {
+  color: #059669;
 }
 
-.online-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #cbd5e1;
-  margin-left: 10px;
-}
-
-.online-dot.on {
-  background: #16a34a;
-  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.15);
-}
-
-.online-text {
-  font-size: 12px;
-  font-weight: 400;
+.stat-num.offline-num {
   color: #6b7280;
-  margin-left: 6px;
 }
 
-.main-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
+.stat-label {
+  font-size: 12px;
+  color: #9ca3af;
+  margin-top: 2px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tool-search {
+  width: 240px;
+}
+
+.tool-select {
+  width: 130px;
+}
+
+.tool-select.wide {
+  width: 220px;
+}
+
+.tool-spacer {
+  flex: 1;
+}
+
+.view-toggle {
+  margin-right: 4px;
+}
+
+.view-toggle :deep(.el-radio-button__inner) {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.toggle-label {
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .console {
+    padding: 12px;
+  }
+
+  .stats-bar {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .tool-search {
+    width: 100%;
+  }
 }
 </style>

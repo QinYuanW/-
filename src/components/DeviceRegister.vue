@@ -1,6 +1,6 @@
 <template>
-  <div class="device-register">
-    <el-button type="primary" class="register-btn" :icon="Plus" @click="openDialog">
+  <div class="device-register" :class="{ inline: !showButton }">
+    <el-button v-if="showButton" type="primary" class="register-btn" :icon="Plus" @click="openDialog">
       注册设备
     </el-button>
 
@@ -83,6 +83,11 @@ import { registerDevice, registerBatch, listProducts } from '../api'
 
 const emit = defineEmits(['registered'])
 
+const props = defineProps({
+  // 3.3：工具栏模式为 false 时不渲染自带按钮（由父组件触发 openDialog）
+  showButton: { type: Boolean, default: true }
+})
+
 const dialogVisible = ref(false)
 const resultVisible = ref(false)
 const submitting = ref(false)
@@ -111,6 +116,26 @@ function openDialog() {
   loadProducts()
 }
 
+// 3.3 批次列表：批量注册成功后把批次信息写入本地记录（后端未建批次表）
+function saveBatchRecord(items) {
+  const keys = (items || []).map((i) => i.device_key)
+  const record = {
+    id: Date.now(),
+    time: new Date().toLocaleString('zh-CN', { hour12: false }),
+    product_key: form.product_key.trim(),
+    name_prefix: form.name_prefix.trim() || 'dev',
+    count: keys.length,
+    keys
+  }
+  try {
+    const list = JSON.parse(localStorage.getItem('iot_batch_records') || '[]')
+    list.unshift(record)
+    localStorage.setItem('iot_batch_records', JSON.stringify(list.slice(0, 50)))
+  } catch (e) {
+    // 本地记录写失败不影响注册主流程
+  }
+}
+
 async function submit() {
   if (!form.product_key.trim()) {
     ElMessage.warning('请填写产品标识')
@@ -135,6 +160,7 @@ async function submit() {
     resultItems.value = items
     dialogVisible.value = false
     resultVisible.value = true
+    if (mode.value === 'batch') saveBatchRecord(items)
     emit('registered')
   } catch (e) {
     // 错误提示已由 axios 拦截器统一处理
@@ -142,11 +168,17 @@ async function submit() {
     submitting.value = false
   }
 }
+
+defineExpose({ openDialog })
 </script>
 
 <style scoped>
 .device-register {
   margin-bottom: 10px;
+}
+
+.device-register.inline {
+  margin-bottom: 0;
 }
 
 .register-btn {
