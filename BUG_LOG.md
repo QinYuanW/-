@@ -310,3 +310,23 @@
 - **修复**：前端改为发送扁平属性映射 `{ [prop.key]: value }`（与遥测上报格式一致）；同步修正 `API契约.md` 指令下发请求示例为扁平格式并注明"后端原样透传、以固件协议为准"
 - **验证**：curl 扁平格式 `{"switch":true}` 下发 → 设备 ACK → status 0→1→2，LED 点亮/熄灭 ✅
 - **状态**：✅ 已解决
+
+## 2026-09-13
+
+### BUG-23：物模型校验扩展 enum 后 Maven 编译失败——Java 不允许嵌套块遮蔽局部变量（`Object raw` 重复定义）
+
+- **现象**：`mvn compile` 报 `[ERROR] ProductServiceImpl.java:[184,32] 已在方法 validateTsl(java.util.Map<java.lang.String,java.lang.Object>)中定义了变量 raw`，编译中断。
+- **场景**：为前端物模型编辑器扩展 enum 类型支持（G5 打磨），在后端 `ProductServiceImpl.validateTsl` 的 `properties` 分支内新增 `type=enum` 校验块，其中声明 `Object raw = item.get("elements")`。
+- **排查根因**：外层 for 循环体顶部已声明 `Object raw = tsl.get(section)`，新增的 `Object raw` 与其**同处一个方法体作用域链**；Java 与 C 不同，**不允许在嵌套块中遮蔽外层同名局部变量**（JLS 6.3：局部变量名不得与在作用域内的同名局部变量重复声明），javac 直接报「变量已定义」。
+- **修复**：内层变量改名 `elems`（`Object elems = item.get("elements")`，后续 instanceof/遍历引用同步替换）。
+- **验证**：`mvn -q compile` EXIT=0 ✅；`mvn package -DskipTests` 出包成功，重启后端 20s 内 8080 就绪 ✅。
+- **状态**：✅ 已解决
+
+### BUG-24：G5 布局重构误删 Console.vue 的 `computed` 导入——运行时 ReferenceError（vite build 检查不出）
+
+- **现象**：控制台页运行时 `ReferenceError: computed is not defined`，页面白屏；`vite build` 却通过（构建期不校验运行期绑定）。
+- **场景**：3.1 左侧导航改造时，从 `Console.vue` 移除顶部 topbar 组件，连带误删了 `<script setup>` 中 `computed` 的 import 声明。
+- **排查根因**：模板/脚本中 `stats` 相关 `computed` 仍在引用 `computed`，但 import 已被删；ESM 下未导入标识符在运行时才抛 ReferenceError，Vite/Rollup 静态构建不做该检查，导致"构建通过、运行白屏"。
+- **修复**：在 `Console.vue` 的 `import { ... } from 'vue'` 中补回 `computed`。
+- **验证**：`vite build` 通过 + 浏览器实测控制台页正常渲染 ✅。
+- **状态**：✅ 已解决（提醒：纯前端布局重构后必须浏览器冒烟，不能只信 build）
