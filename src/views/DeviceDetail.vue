@@ -45,7 +45,13 @@
       <el-tab-pane label="调试" name="debug">
         <div class="panel">
           <div class="panel-title">下发控制 · readwrite 属性 / 服务</div>
-          <ControlPanel :device-key="key" :tsl="tsl" :telemetry="latest" @executed="handleExecuted" />
+          <ControlPanel
+            :device-key="key"
+            :tsl="tsl"
+            :telemetry="latest"
+            :online="device ? online : true"
+            @executed="handleExecuted"
+          />
         </div>
       </el-tab-pane>
 

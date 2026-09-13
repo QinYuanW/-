@@ -1,5 +1,14 @@
 <template>
   <div class="ctrl-panel">
+    <el-alert
+      v-if="online === false"
+      type="warning"
+      :closable="false"
+      show-icon
+      title="设备当前离线，命令无法下发"
+      description="命令在设备离线时会直接失败（不会挂起）。若希望「设备上线后自动生效」，请改用「设备影子」tab 设置期望值。"
+      style="margin-bottom: 12px"
+    />
     <div v-if="!controls.length && !services.length" class="muted-empty">
       该产品无可写属性或服务
     </div>
@@ -18,10 +27,13 @@
           @change="(v) => sendProperty(prop, v)"
         />
         <div v-else-if="prop.type === 'int' || prop.type === 'float'" class="slider-wrap">
+          <!-- 滑块只在物模型显式配了 min/max 时才出现：
+               没配范围却兜底成 0~100，会把「大气压 1013」这类真实值当场卡掉 -->
           <el-slider
+            v-if="hasRange(prop)"
             :model-value="numValue(prop.key)"
-            :min="prop.min ?? 0"
-            :max="prop.max ?? 100"
+            :min="prop.min"
+            :max="prop.max"
             :step="stepOf(prop)"
             :disabled="sendingKey === prop.key"
             style="flex: 1"
@@ -29,16 +41,17 @@
           />
           <el-input-number
             :model-value="numValue(prop.key)"
-            :min="prop.min ?? 0"
-            :max="prop.max ?? 100"
+            :min="prop.min ?? undefined"
+            :max="prop.max ?? undefined"
             :step="stepOf(prop)"
             :disabled="sendingKey === prop.key"
             size="small"
             controls-position="right"
             class="num-input"
+            :class="{ 'num-input-wide': !hasRange(prop) }"
             @change="(v) => sendNumeric(prop, v)"
           />
-          <span class="slider-val">{{ prop.unit || '' }}</span>
+          <span class="slider-val">当前 {{ numValue(prop.key) }}{{ prop.unit || '' }}</span>
         </div>
         <el-select
           v-else-if="prop.type === 'enum'"
@@ -148,7 +161,9 @@ import { dispatchCommand, getCommandStatus } from '../api'
 const props = defineProps({
   deviceKey: { type: String, required: true },
   tsl: { type: Object, default: null },
-  telemetry: { type: Object, default: () => ({}) }
+  telemetry: { type: Object, default: () => ({}) },
+  // 设备在线状态：离线时命令必然失败（E1 语义分家），提前提示用户改用影子期望值
+  online: { type: Boolean, default: true }
 })
 const emit = defineEmits(['executed'])
 
@@ -210,6 +225,10 @@ function numValue(key) {
 
 /** 数值步长：物模型未配则按类型给默认（int 1 / float 0.1） */
 const stepOf = (prop) => prop.step ?? (prop.type === 'int' ? 1 : 0.1)
+
+/** 是否显式配了值域 —— 决定要不要渲染滑块（未配时滑块区间无意义，且会误伤真实值） */
+const hasRange = (prop) =>
+  prop.min !== undefined && prop.min !== null && prop.max !== undefined && prop.max !== null
 
 /** 输入框回传：拦住空值与 NaN，避免误下发 0 */
 function sendNumeric(prop, v) {
@@ -362,6 +381,11 @@ onBeforeUnmount(() => {
 .num-input {
   width: 118px;
   flex-shrink: 0;
+}
+
+/* 物模型未配值域时没有滑块，输入框独占该行，给足宽度 */
+.num-input-wide {
+  width: 200px;
 }
 
 /* string 属性：输入框 + 显式下发按钮 */
