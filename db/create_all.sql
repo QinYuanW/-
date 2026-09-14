@@ -72,3 +72,47 @@ CREATE TABLE IF NOT EXISTS user (
   PRIMARY KEY (id),
   UNIQUE KEY uk_username (username)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- E3 规则引擎与告警（2026-09-14）
+-- ============================================================
+
+-- 阈值规则定义。命中后生成告警，可选联动下发指令。
+CREATE TABLE IF NOT EXISTS device_rule (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  name VARCHAR(64) NOT NULL,
+  product_key VARCHAR(32) NOT NULL,
+  device_key VARCHAR(64) NULL COMMENT 'NULL = 作用于该产品下所有设备',
+  property_key VARCHAR(64) NOT NULL,
+  operator VARCHAR(4) NOT NULL COMMENT '> >= < <= == !=',
+  threshold DECIMAL(18,4) NOT NULL,
+  level TINYINT NOT NULL DEFAULT 2 COMMENT '1 严重 / 2 一般 / 3 提示',
+  alarm_type VARCHAR(32) NOT NULL DEFAULT '规则告警',
+  action_type TINYINT NOT NULL DEFAULT 0 COMMENT '0 仅告警 / 1 告警并下发指令',
+  action_payload JSON NULL COMMENT 'action_type=1 时下发到设备的 payload',
+  cooldown_sec INT NOT NULL DEFAULT 60 COMMENT '抑制窗口：同规则同设备 N 秒内只告警一次',
+  enabled TINYINT NOT NULL DEFAULT 1,
+  deleted TINYINT NOT NULL DEFAULT 0,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  KEY idx_product_enabled (product_key, enabled, deleted)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 告警记录。独立成表而不复用 device_log：告警有结构化字段与「未处理→已处理」状态流转，
+-- 塞进 device_log 的 1024 字符自由文本会让筛选与统计退化成字符串解析。
+CREATE TABLE IF NOT EXISTS device_alarm (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  device_id BIGINT UNSIGNED NOT NULL,
+  rule_id BIGINT UNSIGNED NULL,
+  alarm_type VARCHAR(32) NOT NULL DEFAULT '规则告警',
+  level TINYINT NOT NULL DEFAULT 2 COMMENT '1 严重 / 2 一般 / 3 提示',
+  rule_name VARCHAR(64) NULL,
+  content VARCHAR(512) NULL,
+  status TINYINT NOT NULL DEFAULT 0 COMMENT '0 未处理 / 1 已处理',
+  handled_at DATETIME(3) NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  KEY idx_device_time (device_id, created_at),
+  KEY idx_status_time (status, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
