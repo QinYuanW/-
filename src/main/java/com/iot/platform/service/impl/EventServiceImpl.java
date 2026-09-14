@@ -55,8 +55,8 @@ public class EventServiceImpl implements EventService {
     @Override
     public void receive(EventRequest request) {
         try {
-            if (request.getDeviceKey() == null || request.getEventKey() == null) {
-                log.warn("事件上报缺关键字段，丢弃: {}", request);
+            if (request.getDeviceKey() == null) {
+                log.warn("事件上报缺 device_key，丢弃: {}", request);
                 return;
             }
             Device device = resolveDevice(request.getDeviceKey());
@@ -170,9 +170,11 @@ public class EventServiceImpl implements EventService {
                     for (Object o : list) {
                         if (o instanceof Map<?, ?> ev) {
                             String key = String.valueOf(ev.get("key"));
+                            Object name = ev.get("name");
+                            Object type = ev.get("type");
                             Map<String, String> def = new LinkedHashMap<>();
-                            def.put("name", String.valueOf(ev.getOrDefault("name", key)));
-                            def.put("type", String.valueOf(ev.getOrDefault("type", "info")));
+                            def.put("name", name == null ? key : String.valueOf(name));
+                            def.put("type", type == null ? "info" : String.valueOf(type));
                             defs.put(key, def);
                         }
                     }
