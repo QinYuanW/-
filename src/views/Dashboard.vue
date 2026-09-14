@@ -67,7 +67,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import * as echarts from 'echarts'
 import {
   Box,
@@ -79,7 +79,24 @@ import {
   Calendar,
   Clock
 } from '@element-plus/icons-vue'
-import { overview, messageTrend, alarmList } from '../mock/dashboard'
+import { getStatsOverview, getMessageTrend, listAlerts } from '../api'
+
+// ===== 实时数据（E6 接入，mock 已下线）=====
+// 刻意保持与 mock 相同的结构，这样模板与 statCards / initTrend 的引用方式无需改动。
+
+const overview = reactive({
+  product: { total: 0, enabled: 0, disabled: 0 },
+  device: { total: 0, online: 0, offline: 0, enabled: 0, disabled: 0 },
+  message: { total: 0, month: 0, today: 0 },
+  alarm: { total: 0, month: 0, today: 0 }
+})
+
+const messageTrend = reactive({ months: [], message: [], warn: [] })
+const alarmList = ref([])
+const loading = ref(false)
+
+/** 通知趋势图重绘（数据是异步到的，initTrend 时可能还是空的） */
+const trendReady = ref(false)
 
 const trendEl = ref()
 let chart = null
@@ -170,7 +187,7 @@ function initTrend() {
     },
     yAxis: {
       type: 'value',
-      max: 2300000,
+      // 原先硬编码 max: 2300000（照 mock 量级写的）——真实数据量级不同会把曲线压扁，交给 ECharts 自适应
       splitLine: { lineStyle: { type: 'dashed', color: '#eef1f6' } },
       axisLabel: { color: '#9ca3af', fontSize: 11, formatter: (v) => v.toLocaleString() }
     },
@@ -208,7 +225,47 @@ function onResize() {
   chart && chart.resize()
 }
 
-onMounted(initTrend)
+async function loadDashboard() {
+  loading.value = true
+  try {
+    const [ov, trend, alarms] = await Promise.all([
+      getStatsOverview(),
+      getMessageTrend('day', 30),
+      listAlerts(1, 10)
+    ])
+
+    Object.assign(overview, ov.data)
+
+    // 趋势：后端只返回「有数据的桶」，X 轴标签截成 MM-DD 便于阅读
+    const items = trend.data?.items || []
+    messageTrend.months = items.map((i) => (i.bucket?.length === 10 ? i.bucket.slice(5) : i.bucket))
+    messageTrend.message = items.map((i) => i.message)
+    messageTrend.warn = items.map((i) => i.alarm)
+
+    // 告警：后端字段为 snake_case，表格按 camelCase 绑定，这里做一次映射
+    alarmList.value = (alarms.data?.items || []).map((a) => ({
+      id: a.id,
+      alarmType: a.alarm_type,
+      level: a.level,
+      ruleName: a.rule_name,
+      productKey: a.product_key,
+      deviceKey: a.device_key,
+      status: a.status,
+      alarmAt: a.alarm_at
+    }))
+    trendReady.value = true
+  } catch (e) {
+    // 拦截器已提示；保留空态渲染，不阻塞页面
+  } finally {
+    loading.value = false
+  }
+}
+
+// 必须先取数再画图：否则 xAxis/series 拿到的是空数组，图表会是空白
+onMounted(async () => {
+  await loadDashboard()
+  initTrend()
+})
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)

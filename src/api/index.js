@@ -76,6 +76,21 @@ export const getHistoryTelemetry = (deviceKey, property, start, end) =>
 export const mockReportTelemetry = (data) =>
   http.post('/telemetry', data)
 
+// ===== E6 控制台统计（仪表盘「物联概览」）=====
+// 契约见 docs/02_设计契约/API契约.md §7
+
+/** 概览统计：product / device / message / alarm */
+export const getStatsOverview = () =>
+  http.get('/stats/overview')
+
+/** 消息趋势；granularity=day（默认近 30 天）| month（近 12 月） */
+export const getMessageTrend = (granularity = 'day', range) =>
+  http.get('/stats/message-trend', { params: { granularity, range } })
+
+/** 告警列表（E6 阶段后端返回空列表，数据链路依赖 E3） */
+export const listAlerts = (page = 1, size = 10) =>
+  http.get('/alerts', { params: { page, size } })
+
 export const dispatchCommand = (deviceKey, commandType, payload) =>
   http.post(`/devices/${deviceKey}/commands`, { command_type: commandType, payload })
 
