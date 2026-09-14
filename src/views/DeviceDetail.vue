@@ -43,15 +43,30 @@
       </el-tab-pane>
 
       <el-tab-pane label="调试" name="debug">
-        <div class="panel">
-          <div class="panel-title">下发控制 · readwrite 属性 / 服务</div>
-          <ControlPanel
-            :device-key="key"
-            :tsl="tsl"
-            :telemetry="latest"
-            :online="device ? online : true"
-            @executed="handleExecuted"
-          />
+        <div class="debug-grid">
+          <div class="debug-left">
+            <div class="panel">
+              <div class="panel-title">下发控制 · 平台 → 设备</div>
+              <ControlPanel
+                :device-key="key"
+                :tsl="tsl"
+                :telemetry="latest"
+                :online="device ? online : true"
+                @executed="handleExecuted"
+                @log="pushLog"
+                @log-status="updateLogStatus"
+              />
+            </div>
+            <div class="panel">
+              <MockReport :device-key="key" :tsl="tsl" @log="pushLog" />
+            </div>
+          </div>
+
+          <div class="debug-right">
+            <div class="panel debug-log-panel">
+              <DebugLog :logs="debugLogs" @clear="clearLogs" />
+            </div>
+          </div>
         </div>
       </el-tab-pane>
 
@@ -126,6 +141,8 @@ import MetricCards from '../components/MetricCards.vue'
 import HistoryChart from '../components/HistoryChart.vue'
 import ControlPanel from '../components/ControlPanel.vue'
 import ShadowPanel from '../components/ShadowPanel.vue'
+import MockReport from '../components/MockReport.vue'
+import DebugLog from '../components/DebugLog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -238,6 +255,33 @@ function handleLogsPage(p) {
 
 function handleExecuted({ key: k, value: v }) {
   latest.value = { ...latest.value, [k]: v }
+}
+
+// ===== 调试日志：左栏「下发控制」与「模拟上报」共用，右栏 DebugLog 展示 =====
+// 注意命名：`logs` 已被上方「操作日志」tab 占用，这里用 debugLogs 区分
+const debugLogs = ref([])
+const LOG_LIMIT = 50
+
+function pushLog(entry) {
+  const time = new Date().toLocaleTimeString('zh-CN', { hour12: false })
+  debugLogs.value = [
+    { id: `${Date.now()}-${Math.random()}`, time, ...entry },
+    ...debugLogs.value
+  ].slice(0, LOG_LIMIT)
+}
+
+/** 指令轮询到状态跃迁时回填对应日志：0/1 → 2/3/4 的流转在日志里可见 */
+function updateLogStatus({ requestId, status, statusType, response }) {
+  if (!requestId) return
+  const hit = debugLogs.value.find((l) => l.requestId === requestId)
+  if (!hit) return
+  hit.status = status
+  hit.statusType = statusType
+  if (response) hit.response = response
+}
+
+function clearLogs() {
+  debugLogs.value = []
 }
 
 function startPolling() {
@@ -365,5 +409,50 @@ onBeforeUnmount(() => clearInterval(pollTimer))
   display: flex;
   justify-content: flex-end;
   margin-top: 12px;
+}
+
+/* 调试台两栏：左「下发控制 + 模拟上报」，右「调试日志」（sticky 跟随滚动） */
+.debug-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.debug-grid .panel {
+  margin-bottom: 0;
+}
+
+.debug-left {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.debug-right {
+  min-width: 0;
+  position: sticky;
+  top: 0;
+}
+
+.debug-log-panel {
+  height: 580px;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (max-width: 1200px) {
+  .debug-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .debug-right {
+    position: static;
+  }
+
+  .debug-log-panel {
+    height: 380px;
+  }
 }
 </style>

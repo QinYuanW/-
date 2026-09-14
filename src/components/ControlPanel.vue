@@ -153,7 +153,7 @@ const props = defineProps({
   // 设备在线状态：离线时命令必然失败（E1 语义分家），提前提示用户改用影子期望值
   online: { type: Boolean, default: true }
 })
-const emit = defineEmits(['executed'])
+const emit = defineEmits(['executed', 'log', 'log-status'])
 
 const controls = computed(() =>
   (props.tsl?.properties || []).filter((p) => p.access === 'readwrite')
@@ -179,6 +179,10 @@ const STATUS_MAP = {
   3: { text: '失败', cls: 'failed' },
   4: { text: '超时', cls: 'timeout' }
 }
+
+/** 调试日志用：状态 → Element Plus Tag 类型 */
+const STATUS_TAG = { 0: 'warning', 1: 'primary', 2: 'success', 3: 'danger', 4: 'danger' }
+const statusLabel = (s) => STATUS_MAP[s]?.text || '未知'
 
 const statusText = computed(() => {
   if (!lastCommand.value) return ''
@@ -254,13 +258,31 @@ watch(() => props.telemetry, (t) => {
 async function sendProperty(prop, value) {
   sendingKey.value = prop.key
   optimistic.value[prop.key] = value
+  const payload = { [prop.key]: value }
   try {
-    const res = await dispatchCommand(props.deviceKey, 1, { [prop.key]: value })
+    const res = await dispatchCommand(props.deviceKey, 1, payload)
     lastCommand.value = res.data
     dispatchToast(prop.name, res.data.status)
+    emit('log', {
+      requestId: res.data.request_id,
+      action: '下发属性',
+      actionType: 'primary',
+      status: statusLabel(res.data.status),
+      statusType: STATUS_TAG[res.data.status] || 'info',
+      request: { command_type: 1, payload },
+      response: res.data
+    })
     startPolling(res.data.request_id, prop.key, value)
   } catch (e) {
     delete optimistic.value[prop.key]
+    emit('log', {
+      action: '下发属性',
+      actionType: 'danger',
+      status: '下发失败',
+      statusType: 'danger',
+      request: { command_type: 1, payload },
+      response: { error: e?.message || '请求失败' }
+    })
   } finally {
     sendingKey.value = ''
   }
@@ -292,17 +314,33 @@ function confirmService() {
 
 async function callService(svc, params) {
   sendingKey.value = svc.key
+  // payload 后端原样透传至 down/{device_key}/command；带参服务形如
+  // { "service_key": "set_mode", "params": { "mode": 2 } }
+  const payload = { service_key: svc.key }
+  if (params && Object.keys(params).length) payload.params = params
   try {
-    // payload 后端原样透传至 down/{device_key}/command；带参服务形如
-    // { "service_key": "set_mode", "params": { "mode": 2 } }
-    const payload = { service_key: svc.key }
-    if (params && Object.keys(params).length) payload.params = params
     const res = await dispatchCommand(props.deviceKey, 2, payload)
     lastCommand.value = res.data
     dispatchToast(`服务 ${svc.name}`, res.data.status)
+    emit('log', {
+      requestId: res.data.request_id,
+      action: '调用服务',
+      actionType: 'primary',
+      status: statusLabel(res.data.status),
+      statusType: STATUS_TAG[res.data.status] || 'info',
+      request: { command_type: 2, payload },
+      response: res.data
+    })
     startPolling(res.data.request_id)
   } catch (e) {
-    // 拦截器已提示
+    emit('log', {
+      action: '调用服务',
+      actionType: 'danger',
+      status: '调用失败',
+      statusType: 'danger',
+      request: { command_type: 2, payload },
+      response: { error: e?.message || '请求失败' }
+    })
   } finally {
     sendingKey.value = ''
   }
@@ -314,6 +352,13 @@ function startPolling(requestId, propKey, propValue) {
     try {
       const res = await getCommandStatus(requestId)
       lastCommand.value = res.data
+      // 指令生命周期回填日志：0/1 → 2/3/4 的状态跃迁在调试日志里可见
+      emit('log-status', {
+        requestId,
+        status: statusLabel(res.data.status),
+        statusType: STATUS_TAG[res.data.status] || 'info',
+        response: res.data
+      })
       if (res.data.status === 2) {
         // 设备已执行 → 乐观更新本地状态，不等下一次遥测轮询
         if (propKey !== undefined) emit('executed', { key: propKey, value: propValue })
