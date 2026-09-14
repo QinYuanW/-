@@ -98,14 +98,44 @@
 
       <el-tab-pane lazy label="事件记录" name="events">
         <div class="panel">
-          <el-empty :image-size="90">
-            <template #description>
-              <div class="empty-desc">
-                <p>事件记录功能规划中</p>
-                <span>设备事件通过 <code>up/{{ key }}/event</code> topic 上报，事件存储与查询链路在后端 D/E 段任务实现后开放。</span>
-              </div>
+          <div class="panel-title">设备事件 · 由设备经 <code>up/{{ key }}/event</code> 上报</div>
+          <el-table v-loading="eventsLoading" :data="events" size="small">
+            <el-table-column label="事件时间" width="170">
+              <template #default="{ row }">{{ row.ts }}</template>
+            </el-table-column>
+            <el-table-column label="事件标识" width="150">
+              <template #default="{ row }">
+                <code>{{ row.event_key }}</code>
+              </template>
+            </el-table-column>
+            <el-table-column label="事件名称" min-width="130">
+              <template #default="{ row }">{{ row.event_name }}</template>
+            </el-table-column>
+            <el-table-column label="类型" width="90">
+              <template #default="{ row }">
+                <el-tag :type="eventTypeMeta(row.type).type" size="small" effect="plain">
+                  {{ eventTypeMeta(row.type).text }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="参数" min-width="200">
+              <template #default="{ row }">
+                <code class="event-params">{{ row.paramsText }}</code>
+              </template>
+            </el-table-column>
+            <template #empty>
+              <el-empty description="暂无事件记录" :image-size="70" />
             </template>
-          </el-empty>
+          </el-table>
+          <el-pagination
+            v-if="eventsTotal > eventsPageSize"
+            class="log-pager"
+            layout="total, prev, pager, next"
+            :total="eventsTotal"
+            :page-size="eventsPageSize"
+            :current-page="eventsPage"
+            @current-change="handleEventsPage"
+          />
         </div>
       </el-tab-pane>
 
@@ -150,7 +180,7 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Back, CopyDocument } from '@element-plus/icons-vue'
-import { listDevices, listProducts, getTsl, getLatestTelemetry, listDeviceLogs } from '../api'
+import { listDevices, listProducts, getTsl, getLatestTelemetry, listDeviceLogs, listDeviceEvents } from '../api'
 import { createTelemetrySocket } from '../api/ws'
 import { formatTime } from '../utils/export'
 import { copyText } from '../utils/clipboard'
@@ -265,6 +295,47 @@ async function loadLogs() {
   }
 }
 
+// ===== E3 事件记录（lazy 面板 + 首次打开时才拉取）=====
+const events = ref([])
+const eventsTotal = ref(0)
+const eventsPage = ref(1)
+const eventsPageSize = 20
+const eventsLoading = ref(false)
+const eventsLoaded = ref(false)
+
+const EVENT_TYPE_META = {
+  info: { text: '信息', type: 'info' },
+  alert: { text: '告警', type: 'warning' },
+  fault: { text: '故障', type: 'danger' }
+}
+const eventTypeMeta = (t) => EVENT_TYPE_META[t] || { text: t || '信息', type: 'info' }
+
+async function loadEvents() {
+  eventsLoading.value = true
+  try {
+    const res = await listDeviceEvents(key.value, eventsPage.value, eventsPageSize)
+    events.value = (res.data.items || []).map((e) => ({
+      ...e,
+      paramsText: e.params && Object.keys(e.params).length ? JSON.stringify(e.params) : '-'
+    }))
+    eventsTotal.value = res.data.total || 0
+    eventsLoaded.value = true
+  } catch {
+    events.value = []
+  } finally {
+    eventsLoading.value = false
+  }
+}
+
+function handleEventsPage(p) {
+  eventsPage.value = p
+  loadEvents()
+}
+
+watch(activeTab, (t) => {
+  if (t === 'events' && !eventsLoaded.value) loadEvents()
+})
+
 function handleLogsPage(p) {
   logsPage.value = p
   loadLogs()
@@ -364,6 +435,9 @@ watch(key, () => {
   latest.value = {}
   logs.value = []
   logsPage.value = 1
+  events.value = []
+  eventsPage.value = 1
+  eventsLoaded.value = false
   activeTab.value = 'info'
   init()
   // 订阅的设备变了 → 重建实时通道

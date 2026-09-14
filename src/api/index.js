@@ -91,6 +91,10 @@ export const getMessageTrend = (granularity = 'day', range) =>
 export const listAlerts = (page = 1, size = 10) =>
   http.get('/alerts', { params: { page, size } })
 
+/** E3 设备事件分页（事件记录 tab；契约 §8.2） */
+export const listDeviceEvents = (deviceKey, page = 1, size = 20, eventKey) =>
+  http.get(`/devices/${deviceKey}/events`, { params: { page, size, event_key: eventKey } })
+
 export const dispatchCommand = (deviceKey, commandType, payload) =>
   http.post(`/devices/${deviceKey}/commands`, { command_type: commandType, payload })
 
