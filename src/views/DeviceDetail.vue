@@ -10,7 +10,7 @@
     </div>
 
     <el-tabs v-model="activeTab" class="detail-tabs">
-      <el-tab-pane label="设备信息" name="info">
+      <el-tab-pane lazy label="设备信息" name="info">
         <div class="panel">
           <el-descriptions :column="2" border size="small">
             <el-descriptions-item label="device_key">{{ key }}</el-descriptions-item>
@@ -28,7 +28,7 @@
         </div>
       </el-tab-pane>
 
-      <el-tab-pane label="实时数据" name="telemetry">
+      <el-tab-pane lazy label="实时数据" name="telemetry">
         <div class="panel">
           <div class="panel-title">
             最新数据
@@ -42,10 +42,10 @@
         </div>
       </el-tab-pane>
 
-      <el-tab-pane label="调试" name="debug">
+      <el-tab-pane lazy label="调试" name="debug">
         <!-- 两个方向分成独立视图（对齐 OneNET「应用模拟器 / 设备模拟器」的分层），日志各看各的 -->
         <el-tabs v-model="debugMode" class="debug-subtabs">
-          <el-tab-pane label="下发控制 · 平台 → 设备" name="down">
+          <el-tab-pane lazy label="下发控制 · 平台 → 设备" name="down">
             <div class="debug-grid">
               <div class="debug-left">
                 <div class="panel">
@@ -69,7 +69,7 @@
             </div>
           </el-tab-pane>
 
-          <el-tab-pane label="模拟上报 · 设备 → 平台" name="up">
+          <el-tab-pane lazy label="模拟上报 · 设备 → 平台" name="up">
             <div class="debug-grid">
               <div class="debug-left">
                 <div class="panel">
@@ -86,7 +86,7 @@
         </el-tabs>
       </el-tab-pane>
 
-      <el-tab-pane label="设备影子" name="shadow">
+      <el-tab-pane lazy label="设备影子" name="shadow">
         <div class="panel">
           <div class="panel-title">
             设备影子 · 期望值 / 上报值 / 差异
@@ -96,7 +96,7 @@
         </div>
       </el-tab-pane>
 
-      <el-tab-pane label="事件记录" name="events">
+      <el-tab-pane lazy label="事件记录" name="events">
         <div class="panel">
           <el-empty :image-size="90">
             <template #description>
@@ -109,7 +109,7 @@
         </div>
       </el-tab-pane>
 
-      <el-tab-pane label="操作日志" name="logs">
+      <el-tab-pane lazy label="操作日志" name="logs">
         <div class="panel">
           <div class="panel-title">设备日志 · 上下线 / 指令 / 操作</div>
           <el-table v-loading="logsLoading" :data="logs" size="small">
