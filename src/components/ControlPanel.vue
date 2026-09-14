@@ -26,19 +26,8 @@
           :loading="sendingKey === prop.key"
           @change="(v) => sendProperty(prop, v)"
         />
-        <div v-else-if="prop.type === 'int' || prop.type === 'float'" class="slider-wrap">
-          <!-- 滑块只在物模型显式配了 min/max 时才出现：
-               没配范围却兜底成 0~100，会把「大气压 1013」这类真实值当场卡掉 -->
-          <el-slider
-            v-if="hasRange(prop)"
-            :model-value="numValue(prop.key)"
-            :min="prop.min"
-            :max="prop.max"
-            :step="stepOf(prop)"
-            :disabled="sendingKey === prop.key"
-            style="flex: 1"
-            @change="(v) => sendProperty(prop, v)"
-          />
+        <div v-else-if="prop.type === 'int' || prop.type === 'float'" class="num-wrap">
+          <!-- 只用输入框：滑块与输入框语义重复，且滑块松手就立即下发，比输入更容易误触 -->
           <el-input-number
             :model-value="numValue(prop.key)"
             :min="prop.min ?? undefined"
@@ -48,10 +37,9 @@
             size="small"
             controls-position="right"
             class="num-input"
-            :class="{ 'num-input-wide': !hasRange(prop) }"
             @change="(v) => sendNumeric(prop, v)"
           />
-          <span class="slider-val">当前 {{ numValue(prop.key) }}{{ prop.unit || '' }}</span>
+          <span class="num-cur">当前 {{ numValue(prop.key) }}{{ prop.unit || '' }}</span>
         </div>
         <el-select
           v-else-if="prop.type === 'enum'"
@@ -226,10 +214,6 @@ function numValue(key) {
 /** 数值步长：物模型未配则按类型给默认（int 1 / float 0.1） */
 const stepOf = (prop) => prop.step ?? (prop.type === 'int' ? 1 : 0.1)
 
-/** 是否显式配了值域 —— 决定要不要渲染滑块（未配时滑块区间无意义，且会误伤真实值） */
-const hasRange = (prop) =>
-  prop.min !== undefined && prop.min !== null && prop.max !== undefined && prop.max !== null
-
 /** 输入框回传：拦住空值与 NaN，避免误下发 0 */
 function sendNumeric(prop, v) {
   if (v === null || v === undefined || v === '') return
@@ -378,14 +362,16 @@ onBeforeUnmount(() => {
 }
 
 /* 数值属性：滑块旁挂精确输入框（滑块适合粗调，输入框适合精确值） */
-.num-input {
-  width: 118px;
-  flex-shrink: 0;
+.num-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
-/* 物模型未配值域时没有滑块，输入框独占该行，给足宽度 */
-.num-input-wide {
-  width: 200px;
+/* 数值属性输入框：范围不兜底 —— 物模型没配 min/max 就不限制（曾把「大气压 1013」卡在 100 上） */
+.num-input {
+  width: 140px;
+  flex-shrink: 0;
 }
 
 /* string 属性：输入框 + 显式下发按钮 */
@@ -426,19 +412,11 @@ onBeforeUnmount(() => {
   align-items: center;
 }
 
-.slider-wrap {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 180px;
-}
-
-.slider-val {
+.num-cur {
   font-size: 12px;
   color: #6b7280;
-  min-width: 42px;
-  text-align: right;
   font-family: Consolas, monospace;
+  white-space: nowrap;
 }
 
 .ctrl-divider {
