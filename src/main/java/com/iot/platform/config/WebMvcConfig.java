@@ -24,7 +24,8 @@ public class WebMvcConfig implements WebMvcConfigurer {
                         "/api/v1/login",
                         "/api/v1/auth",
                         "/api/v1/telemetry",
-                        "/api/v1/commands/ack"
+                        "/api/v1/commands/ack",
+                        "/api/v1/events"        // E3 事件上报（EMQX 规则引擎回调，契约 §8.1）
                 );
     }
 }
