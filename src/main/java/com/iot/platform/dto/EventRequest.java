@@ -25,6 +25,10 @@ public class EventRequest {
     /**
      * 设备上报的事件原文。约定形如：
      * {@code {"event_key":"high_temp_alarm","params":{"temperature":58.2}}}
+     *
+     * <p><b>类型是 {@code Object} 而非 Map</b>：EMQX 规则输出的 {@code payload} 可能以
+     * JSON 对象或「转义后的 JSON 字符串」两种形态渲染（实测 rule_test 输出为字符串），
+     * 若声明为 Map，字符串形态会直接反序列化失败。后端用 {@code parsePayloadFlexible} 兼容两种。
      */
-    private Map<String, Object> payload;
+    private Object payload;
 }

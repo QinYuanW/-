@@ -65,14 +65,14 @@ public class EventServiceImpl implements EventService {
                 return;
             }
 
-            // 事件字段藏在 payload 里（EMQX 整体透传，见 EventRequest 的设计说明）
-            String eventKey = request.getPayload() == null
-                    ? null : stringOf(request.getPayload().get("event_key"));
+            // 事件字段藏在 payload 里；EMQX 可能渲染成 JSON 对象或「转义后的 JSON 字符串」两种形态
+            Map<String, Object> payloadMap = parsePayloadFlexible(request.getPayload());
+            String eventKey = payloadMap == null ? null : stringOf(payloadMap.get("event_key"));
             if (eventKey == null) {
                 log.warn("事件上报 payload 缺 event_key，丢弃: {}", request.getPayload());
                 return;
             }
-            Object params = request.getPayload() == null ? null : request.getPayload().get("params");
+            Object params = payloadMap.get("params");
 
             DeviceEvent e = new DeviceEvent();
             e.setDeviceId(device.getId());
@@ -201,6 +201,25 @@ public class EventServiceImpl implements EventService {
             return objectMapper.readValue(String.valueOf(raw), new TypeReference<Map<String, Object>>() {});
         } catch (Exception e) {
             return Map.of();
+        }
+    }
+
+    /**
+     * payload 兼容解析：EMQX 规则输出的 payload 可能是「JSON 对象」或「转义后的 JSON 字符串」，
+     * 两种形态都要能解 —— 字符串形态直接按 Map 反序列化会失败，这就是首版事件不落库的根因。
+     */
+    private Map<String, Object> parsePayloadFlexible(Object raw) {
+        if (raw == null) return null;
+        if (raw instanceof Map<?, ?> m) {
+            try {
+                return objectMapper.convertValue(m, new TypeReference<Map<String, Object>>() {});
+            } catch (Exception ignored) {
+            }
+        }
+        try {
+            return objectMapper.readValue(String.valueOf(raw), new TypeReference<Map<String, Object>>() {});
+        } catch (Exception e) {
+            return null;
         }
     }
 
