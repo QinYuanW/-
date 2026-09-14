@@ -658,24 +658,29 @@
 ```json
 {
   "device_key": "dev_demo_001",
-  "event_key": "high_temp_alarm",
   "ts": 1724997600000,
-  "params": { "temperature": 58.2 }
+  "payload": {
+    "event_key": "high_temp_alarm",
+    "params": { "temperature": 58.2 }
+  }
 }
 ```
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | device_key | string | 设备标识（规则取 MQTT `clientid`） |
-| event_key | string | 物模型 `events[].key` |
-| ts | long | 事件发生时间（毫秒时间戳） |
-| params | object | 事件参数（自由键值，对应物模型事件的输出参数） |
+| ts | long | 事件发生时间（毫秒时间戳，规则取 `timestamp`） |
+| payload | object | **设备上报的事件原文**（EMQX 整体透传） |
+
+> ⚠️ **2026-09-14 变更**：初版平铺 `event_key` / `params`，实测 EMQX body 模板在事件不带 `params` 时会把 `${params}` 渲染成字面 `undefined` 导致 JSON 解析失败；且规则 SQL 的 `payload` 字段存在「对象 / 转义字符串」两种渲染形态。故改为 **`payload` 整体透传**，`event_key` / `params` 由后端从 `payload` 解析（兼容两种形态）。EMQX 动作 body 为 `{"device_key":"${device_key}","ts":${ts},"payload":${payload}}`。
 
 **响应：** `{ "code": 0, "message": "ok" }`
 
 > 建议与遥测上报同构：**立即返回 200，异步落库**（D1 之后可复用 Kafka，topic `iot.event`）。需同步加进 JWT 拦截器放行清单（EMQX 无法携带 JWT）。
 
 ### 8.2 事件查询
+
+> ✅ **已实现（2026-09-14）**：`device_event` 表 + EMQX 规则 `forward_event_rule`（`up/+/event`）+ `GET /devices/{key}/events` 全部落地。实测：MQTT 客户端（三元组认证）发布事件 → 落库 → `event_name` 按产品 TSL 回填（如 `high_temp_alarm` → 「高温告警」）。
 
 | 项 | 值 |
 |----|----|
