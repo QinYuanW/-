@@ -151,6 +151,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Back, CopyDocument } from '@element-plus/icons-vue'
 import { listDevices, listProducts, getTsl, getLatestTelemetry, listDeviceLogs } from '../api'
+import { createTelemetrySocket } from '../api/ws'
 import { formatTime } from '../utils/export'
 import { copyText } from '../utils/clipboard'
 import MetricCards from '../components/MetricCards.vue'
@@ -306,9 +307,47 @@ function clearLogs(direction) {
   debugLogs.value = debugLogs.value.filter((l) => l.direction !== direction)
 }
 
-function startPolling() {
-  clearInterval(pollTimer)
+// ===== E2 实时数据：WebSocket 为主，5s 轮询降级为兜底 =====
+// 这样 WS 正常时不产生任何轮询请求；WS 断开（服务端未起 / 网络抖动）时自动回到轮询，
+// 保证数据不断档 —— 不会出现"推送挂了页面就死了"。
+
+let wsClient = null
+
+function startFallbackPolling() {
+  if (pollTimer) return
   pollTimer = setInterval(loadLatest, 5000)
+}
+
+function stopFallbackPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+function connectRealtime() {
+  wsClient = createTelemetrySocket({
+    deviceKey: key.value,
+    // WS 连通 → 停掉轮询，兑现「HTTP 轮询 → WS 推送」的优化
+    onOpen: () => stopFallbackPolling(),
+    // WS 断开 → 立刻恢复轮询兜底（重连由 ws.js 指数退避负责）
+    onClose: () => startFallbackPolling(),
+    onMessage: (msg) => {
+      if (msg.device_key !== key.value) return
+      if (msg.type === 'telemetry' && msg.properties) {
+        latest.value = { ...latest.value, ...msg.properties }
+      } else if (msg.type === 'status' && device.value) {
+        device.value = { ...device.value, online_status: msg.online_status }
+      }
+    }
+  })
+}
+
+function disconnectRealtime() {
+  if (wsClient) {
+    wsClient.close()
+    wsClient = null
+  }
 }
 
 function init() {
@@ -327,15 +366,22 @@ watch(key, () => {
   logsPage.value = 1
   activeTab.value = 'info'
   init()
-  startPolling()
+  // 订阅的设备变了 → 重建实时通道
+  disconnectRealtime()
+  startFallbackPolling()
+  connectRealtime()
 })
 
 onMounted(() => {
   init()
-  startPolling()
+  startFallbackPolling()   // 先起兜底；WS 一旦连通会自动把它停掉
+  connectRealtime()
 })
 
-onBeforeUnmount(() => clearInterval(pollTimer))
+onBeforeUnmount(() => {
+  disconnectRealtime()
+  stopFallbackPolling()
+})
 </script>
 
 <style scoped>
