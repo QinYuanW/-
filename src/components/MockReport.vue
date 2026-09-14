@@ -154,6 +154,7 @@ async function submit() {
   try {
     const res = await mockReportTelemetry(payload)
     emit('log', {
+      direction: 'up',
       action: '模拟上报',
       actionType: 'success',
       status: `已上报 ${picked.value.length} 项`,
@@ -164,6 +165,7 @@ async function submit() {
     ElMessage.success(`已模拟上报 ${picked.value.length} 个属性`)
   } catch (e) {
     emit('log', {
+      direction: 'up',
       action: '模拟上报',
       actionType: 'danger',
       status: '上报失败',

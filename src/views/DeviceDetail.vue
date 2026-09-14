@@ -43,31 +43,47 @@
       </el-tab-pane>
 
       <el-tab-pane label="调试" name="debug">
-        <div class="debug-grid">
-          <div class="debug-left">
-            <div class="panel">
-              <div class="panel-title">下发控制 · 平台 → 设备</div>
-              <ControlPanel
-                :device-key="key"
-                :tsl="tsl"
-                :telemetry="latest"
-                :online="device ? online : true"
-                @executed="handleExecuted"
-                @log="pushLog"
-                @log-status="updateLogStatus"
-              />
+        <!-- 两个方向分成独立视图（对齐 OneNET「应用模拟器 / 设备模拟器」的分层），日志各看各的 -->
+        <el-tabs v-model="debugMode" class="debug-subtabs">
+          <el-tab-pane label="下发控制 · 平台 → 设备" name="down">
+            <div class="debug-grid">
+              <div class="debug-left">
+                <div class="panel">
+                  <div class="panel-title">属性设置 / 服务调用</div>
+                  <ControlPanel
+                    :device-key="key"
+                    :tsl="tsl"
+                    :telemetry="latest"
+                    :online="device ? online : true"
+                    @executed="handleExecuted"
+                    @log="pushLog"
+                    @log-status="updateLogStatus"
+                  />
+                </div>
+              </div>
+              <div class="debug-right">
+                <div class="panel debug-log-panel">
+                  <DebugLog :logs="downLogs" @clear="clearLogs('down')" />
+                </div>
+              </div>
             </div>
-            <div class="panel">
-              <MockReport :device-key="key" :tsl="tsl" @log="pushLog" />
-            </div>
-          </div>
+          </el-tab-pane>
 
-          <div class="debug-right">
-            <div class="panel debug-log-panel">
-              <DebugLog :logs="debugLogs" @clear="clearLogs" />
+          <el-tab-pane label="模拟上报 · 设备 → 平台" name="up">
+            <div class="debug-grid">
+              <div class="debug-left">
+                <div class="panel">
+                  <MockReport :device-key="key" :tsl="tsl" @log="pushLog" />
+                </div>
+              </div>
+              <div class="debug-right">
+                <div class="panel debug-log-panel">
+                  <DebugLog :logs="upLogs" @clear="clearLogs('up')" />
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
+          </el-tab-pane>
+        </el-tabs>
       </el-tab-pane>
 
       <el-tab-pane label="设备影子" name="shadow">
@@ -253,14 +269,19 @@ function handleLogsPage(p) {
   loadLogs()
 }
 
-function handleExecuted({ key: k, value: v }) {
-  latest.value = { ...latest.value, [k]: v }
+/** 下发成功（设备已执行）后本地回填遥测，不等下一轮轮询 */
+function handleExecuted(patch) {
+  latest.value = { ...latest.value, ...patch }
 }
 
-// ===== 调试日志：左栏「下发控制」与「模拟上报」共用，右栏 DebugLog 展示 =====
+// ===== 调试日志：按方向隔离（down=下发控制，up=模拟上报），各视图只看自己那一半 =====
 // 注意命名：`logs` 已被上方「操作日志」tab 占用，这里用 debugLogs 区分
 const debugLogs = ref([])
 const LOG_LIMIT = 50
+const debugMode = ref('down')   // 调试题的子视图：down | up
+
+const downLogs = computed(() => debugLogs.value.filter((l) => l.direction === 'down'))
+const upLogs = computed(() => debugLogs.value.filter((l) => l.direction === 'up'))
 
 function pushLog(entry) {
   const time = new Date().toLocaleTimeString('zh-CN', { hour12: false })
@@ -280,8 +301,9 @@ function updateLogStatus({ requestId, status, statusType, response }) {
   if (response) hit.response = response
 }
 
-function clearLogs() {
-  debugLogs.value = []
+/** 只清当前方向的日志，互不影响 */
+function clearLogs(direction) {
+  debugLogs.value = debugLogs.value.filter((l) => l.direction !== direction)
 }
 
 function startPolling() {
@@ -411,7 +433,16 @@ onBeforeUnmount(() => clearInterval(pollTimer))
   margin-top: 12px;
 }
 
-/* 调试台两栏：左「下发控制 + 模拟上报」，右「调试日志」（sticky 跟随滚动） */
+/* 调试题内的方向子 tab（下发控制 / 模拟上报） */
+.debug-subtabs :deep(.el-tabs__header) {
+  margin-bottom: 12px;
+}
+
+.debug-subtabs :deep(.el-tabs__item) {
+  font-size: 13px;
+}
+
+/* 调试台两栏：左功能点，右调试日志（sticky 跟随滚动） */
 .debug-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
