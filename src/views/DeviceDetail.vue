@@ -332,9 +332,11 @@ function handleEventsPage(p) {
   loadEvents()
 }
 
+// lazy 面板 + 首次打开时才拉取。immediate：处理「带 ?tab=events 直达」的情况 ——
+// 此时 activeTab 初始值就是 events，watch 不加 immediate 不会触发，数据就永远不加载
 watch(activeTab, (t) => {
   if (t === 'events' && !eventsLoaded.value) loadEvents()
-})
+}, { immediate: true })
 
 function handleLogsPage(p) {
   logsPage.value = p
