@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iot.platform.common.PermanentTelemetryException;
 import com.iot.platform.config.KafkaConfig;
 import com.iot.platform.dto.TelemetryRequest;
+import com.iot.platform.service.RuleEngineService;
 import com.iot.platform.service.TelemetryService;
 import com.iot.platform.ws.TelemetryWebSocketHandler;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -46,6 +47,7 @@ public class TelemetryKafkaListener {
 
     private final TelemetryService telemetryService;
     private final TelemetryWebSocketHandler wsHandler;
+    private final RuleEngineService ruleEngineService;
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
 
@@ -61,9 +63,14 @@ public class TelemetryKafkaListener {
     public void onMessage(String payload) {
         TelemetryRequest request = parse(payload);
         telemetryService.processSync(request);
+
         // E2：落库成功后推送给在线控制台。
         // 顺序很重要 —— 先持久化再推送，前端收到的每一条都是已入库的数据。
         wsHandler.broadcastTelemetry(request);
+
+        // E3：规则引擎评估（内部全量吞异常）。放在最后 —— 规则是旁路，
+        // 它出问题不该影响"入库 + 推送"这两件正事，也不该让消息进重试阶梯。
+        ruleEngineService.evaluate(request);
     }
 
     /** 反序列化失败同样是永久失败（脏报文不会自愈），直接送 DLT，不占重试阶梯。 */

@@ -1,6 +1,8 @@
 package com.iot.platform.service.impl;
 
+import com.iot.platform.mapper.DeviceAlarmMapper;
 import com.iot.platform.mapper.StatsMapper;
+import com.iot.platform.service.AlarmService;
 import com.iot.platform.service.StatsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,6 +30,8 @@ public class StatsServiceImpl implements StatsService {
     private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
     private final StatsMapper statsMapper;
+    private final DeviceAlarmMapper alarmMapper;
+    private final AlarmService alarmService;
 
     @Override
     public Map<String, Object> overview() {
@@ -61,8 +65,11 @@ public class StatsServiceImpl implements StatsService {
                 "month", statsMapper.countTelemetrySince(monthStart),
                 "today", statsMapper.countTelemetrySince(todayStart)));
 
-        // 告警链路依赖 E3，本阶段恒为 0（不是缺陷，见实施方案 §0）
-        result.put("alarm", Map.of("total", 0, "month", 0, "today", 0));
+        // E3 起接入真实告警（device_alarm），口径与消息一致：全量 / 本月 / 今日
+        result.put("alarm", Map.of(
+                "total", alarmMapper.countAll(),
+                "month", alarmMapper.countSince(monthStart),
+                "today", alarmMapper.countSince(todayStart)));
 
         return result;
     }
@@ -100,11 +107,7 @@ public class StatsServiceImpl implements StatsService {
 
     @Override
     public Map<String, Object> alerts(Integer page, Integer size) {
-        // E6 阶段空壳：结构与 API契约 §7.3 对齐，数据写入待 E3
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("total", 0);
-        result.put("types", List.of());
-        result.put("items", List.of());
-        return result;
+        // E3 起接入真实告警数据（结构与 API契约 §7.3 一致）
+        return alarmService.page(page, size, null, null);
     }
 }
