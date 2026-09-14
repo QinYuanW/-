@@ -29,6 +29,15 @@
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
 
+        <!-- E2 WebSocket：设备详情实时数据推送（替代 5s 轮询）。
+             注：tomcat-embed-websocket 已随 starter-web 传递引入（Tomcat 侧实现），
+             但注册端点所需的 WebSocketConfigurer / ServerEndpointExporter 在 spring-websocket 模块，
+             必须显式引入本 starter。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
+
         <!-- MyBatis-Plus（Spring Boot 3 适配版） -->
         <dependency>
             <groupId>com.baomidou</groupId>

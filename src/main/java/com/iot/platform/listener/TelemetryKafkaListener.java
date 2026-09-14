@@ -5,6 +5,7 @@ import com.iot.platform.common.PermanentTelemetryException;
 import com.iot.platform.config.KafkaConfig;
 import com.iot.platform.dto.TelemetryRequest;
 import com.iot.platform.service.TelemetryService;
+import com.iot.platform.ws.TelemetryWebSocketHandler;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -44,6 +45,7 @@ import org.springframework.stereotype.Component;
 public class TelemetryKafkaListener {
 
     private final TelemetryService telemetryService;
+    private final TelemetryWebSocketHandler wsHandler;
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
 
@@ -57,7 +59,11 @@ public class TelemetryKafkaListener {
     )
     @KafkaListener(topics = KafkaConfig.TOPIC, groupId = KafkaConfig.CONSUMER_GROUP)
     public void onMessage(String payload) {
-        telemetryService.processSync(parse(payload));
+        TelemetryRequest request = parse(payload);
+        telemetryService.processSync(request);
+        // E2：落库成功后推送给在线控制台。
+        // 顺序很重要 —— 先持久化再推送，前端收到的每一条都是已入库的数据。
+        wsHandler.broadcastTelemetry(request);
     }
 
     /** 反序列化失败同样是永久失败（脏报文不会自愈），直接送 DLT，不占重试阶梯。 */
