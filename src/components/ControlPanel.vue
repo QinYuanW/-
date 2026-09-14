@@ -9,102 +9,120 @@
       description="命令在设备离线时会直接失败（不会挂起）。若希望「设备上线后自动生效」，请改用「设备影子」tab 设置期望值。"
       style="margin-bottom: 12px"
     />
+
     <div v-if="!controls.length && !services.length" class="muted-empty">
       该产品无可写属性或服务
     </div>
 
-    <!-- 可写属性控件 -->
-    <div v-for="prop in controls" :key="prop.key" class="ctrl-row">
-      <div class="ctrl-label">
-        {{ prop.name }}
-        <small>{{ prop.key }} · {{ prop.type }}</small>
-      </div>
-      <div class="ctrl-widget">
-        <el-switch
-          v-if="prop.type === 'bool'"
-          :model-value="boolValue(prop.key)"
-          :loading="sendingKey === prop.key"
-          @change="(v) => sendProperty(prop, v)"
-        />
-        <div v-else-if="prop.type === 'int' || prop.type === 'float'" class="num-wrap">
-          <!-- 只用输入框：滑块与输入框语义重复，且滑块松手就立即下发，比输入更容易误触 -->
-          <el-input-number
-            :model-value="numValue(prop.key)"
-            :min="prop.min ?? undefined"
-            :max="prop.max ?? undefined"
-            :step="stepOf(prop)"
-            :disabled="sendingKey === prop.key"
-            size="small"
-            controls-position="right"
-            class="num-input"
-            @change="(v) => sendNumeric(prop, v)"
-          />
-          <span class="num-cur">当前 {{ numValue(prop.key) }}{{ prop.unit || '' }}</span>
+    <template v-else>
+      <!-- 可写属性：勾选要设置的项 → 填值 → 一次下发（对齐 OneNET「属性设置」） -->
+      <template v-if="controls.length">
+        <div class="cp-tools">
+          <el-checkbox :model-value="allPicked" :indeterminate="somePicked" @change="toggleAll">
+            全选
+          </el-checkbox>
+          <span class="cp-count">已选 {{ picked.length }} / {{ controls.length }}</span>
         </div>
-        <el-select
-          v-else-if="prop.type === 'enum'"
-          :model-value="enumValue(prop.key)"
-          :loading="sendingKey === prop.key"
-          size="small"
-          style="width: 160px"
-          placeholder="选择枚举值"
-          @change="(v) => sendProperty(prop, v)"
-        >
-          <el-option
-            v-for="opt in prop.elements || []"
-            :key="String(opt.value)"
-            :value="opt.value"
-            :label="opt.key"
-          />
-        </el-select>
-        <div v-else class="str-wrap">
-          <el-input
-            v-model="strDraft[prop.key]"
-            size="small"
-            style="width: 130px"
-            placeholder="输入值"
-            :disabled="sendingKey === prop.key"
-            @keyup.enter="sendString(prop)"
-          />
+
+        <div class="cp-list">
+          <div
+            v-for="p in controls"
+            :key="p.key"
+            class="cp-row"
+            :class="{ picked: picked.includes(p.key) }"
+          >
+            <el-checkbox
+              class="cp-check"
+              :model-value="picked.includes(p.key)"
+              @change="(v) => toggle(p.key, v)"
+            />
+            <div class="cp-label">
+              {{ p.name }}
+              <small>{{ p.key }} · {{ p.type }}</small>
+            </div>
+            <div class="cp-widget">
+              <el-switch v-if="p.type === 'bool'" v-model="draft[p.key]" />
+
+              <el-select
+                v-else-if="p.type === 'enum'"
+                v-model="draft[p.key]"
+                size="small"
+                style="width: 160px"
+                placeholder="选择枚举值"
+              >
+                <el-option
+                  v-for="o in p.elements || []"
+                  :key="String(o.value)"
+                  :value="o.value"
+                  :label="o.key"
+                />
+              </el-select>
+
+              <el-input-number
+                v-else-if="p.type === 'int' || p.type === 'float'"
+                v-model="draft[p.key]"
+                size="small"
+                :min="p.min ?? undefined"
+                :max="p.max ?? undefined"
+                :step="stepOf(p)"
+                controls-position="right"
+                style="width: 140px"
+              />
+
+              <el-input
+                v-else
+                v-model="draft[p.key]"
+                size="small"
+                style="width: 160px"
+                placeholder="输入值"
+              />
+            </div>
+            <span class="cp-cur">当前 {{ curText(p) }}</span>
+          </div>
+        </div>
+
+        <div class="cp-actions">
+          <el-button
+            type="primary"
+            :disabled="!picked.length"
+            :loading="sending"
+            @click="submitPicked"
+          >
+            下发选中（{{ picked.length }}）
+          </el-button>
+          <span class="cp-tip">勾选 → 填值 → 一次下发；右侧「当前 xx」为设备实际上报值</span>
+        </div>
+      </template>
+
+      <!-- 服务调用（沿用即时触发：服务本身即一次动作，无「值」可预填） -->
+      <template v-if="services.length">
+        <div class="ctrl-divider">服务调用</div>
+        <div v-for="svc in services" :key="svc.key" class="ctrl-row">
+          <div class="ctrl-label">
+            {{ svc.name }}
+            <small>{{ svc.key }}</small>
+          </div>
           <el-button
             size="small"
-            :loading="sendingKey === prop.key"
-            @click="sendString(prop)"
+            type="success"
+            plain
+            :loading="sendingKey === svc.key"
+            @click="openService(svc)"
           >
-            下发
+            调用
           </el-button>
         </div>
-      </div>
-    </div>
+      </template>
 
-    <!-- 服务按钮 -->
-    <template v-if="services.length">
-      <div class="ctrl-divider">服务调用</div>
-      <div v-for="svc in services" :key="svc.key" class="ctrl-row">
-        <div class="ctrl-label">
-          {{ svc.name }}
-          <small>{{ svc.key }}</small>
+      <!-- 指令状态 -->
+      <div v-if="lastCommand" class="cmd-status">
+        <div class="cmd-status-title">最近指令</div>
+        <div class="cmd-flow">
+          <span class="badge" :class="statusClass">{{ statusText }}</span>
+          <span class="cmd-req">{{ lastCommand.request_id.slice(0, 8) }}...</span>
         </div>
-        <el-button
-          size="small"
-          type="success"
-          plain
-          :loading="sendingKey === svc.key"
-          @click="openService(svc)"
-        >
-          调用
-        </el-button>
       </div>
     </template>
-
-    <!-- 指令状态 -->
-    <div v-if="lastCommand" class="cmd-status">
-      <div class="cmd-status-title">最近指令</div>
-      <div class="cmd-flow">
-        <span class="badge" :class="statusClass">{{ statusText }}</span>
-        <span class="cmd-req">{{ lastCommand.request_id.slice(0, 8) }}...</span>
-      </div>
-    </div>
 
     <!-- 服务参数表单：物模型配了 inputData 的服务，调用前先填参数 -->
     <el-dialog v-model="svcVisible" :title="`调用服务 · ${svcTarget?.name || ''}`" width="480px">
@@ -153,6 +171,7 @@ const props = defineProps({
   // 设备在线状态：离线时命令必然失败（E1 语义分家），提前提示用户改用影子期望值
   online: { type: Boolean, default: true }
 })
+
 const emit = defineEmits(['executed', 'log', 'log-status'])
 
 const controls = computed(() =>
@@ -161,10 +180,17 @@ const controls = computed(() =>
 const services = computed(() => props.tsl?.services || [])
 
 const sendingKey = ref('')
+const sending = ref(false)      // 批量下发中
 const lastCommand = ref(null)
 const optimistic = ref({})
-const strDraft = reactive({})   // string 属性输入草稿（el-input 必须受控，不能直接用 telemetry 只读绑定）
+const draft = reactive({})      // 待下发的值（用户编辑；不再即时下发）
+const picked = ref([])          // 勾选待下发的属性 key
 let statusTimer = null
+
+const allPicked = computed(
+  () => controls.value.length > 0 && picked.value.length === controls.value.length
+)
+const somePicked = computed(() => picked.value.length > 0 && !allPicked.value)
 
 // 服务调用参数表单（物模型 services[].inputData）
 const svcVisible = ref(false)
@@ -186,84 +212,82 @@ const statusLabel = (s) => STATUS_MAP[s]?.text || '未知'
 
 const statusText = computed(() => {
   if (!lastCommand.value) return ''
-  const s = lastCommand.value.status
-  // E1：0 不再是"一闪而过"，而是设备离线时的常态挂起——把原因讲出来
-  if (s === 0) return '待下发 · 设备离线挂起'
-  return STATUS_MAP[s]?.text || '未知'
+  return STATUS_MAP[lastCommand.value.status]?.text || '未知'
 })
-const statusClass = computed(() => (lastCommand.value ? STATUS_MAP[lastCommand.value.status]?.cls || '' : ''))
+const statusClass = computed(() =>
+  lastCommand.value ? STATUS_MAP[lastCommand.value.status]?.cls || '' : ''
+)
 
-/** E1 后 dispatch 可能返回 0（设备离线挂起）——提示语必须按真实状态给，不能一律喊"已下发" */
-function dispatchToast(name, status) {
-  if (status === 0) {
-    ElMessage.warning(`设备离线，「${name}」已挂起，上线后自动补发`)
-  } else if (status === 1) {
-    ElMessage.success(`已下发「${name}」`)
-  } else {
-    ElMessage.error(`「${name}」下发失败`)
-  }
-}
+/** 步长：物模型未配则按类型给默认（int 1 / float 0.1） */
+const stepOf = (prop) => prop.step ?? (prop.type === 'int' ? 1 : 0.1)
 
-function boolValue(key) {
-  const v = optimistic.value[key] ?? props.telemetry[key]
+function isTruthy(v) {
   return v === true || v === 'true' || v === 1 || v === '1'
 }
 
-function numValue(key) {
-  const v = optimistic.value[key] ?? props.telemetry[key]
-  const n = Number(v)
-  return Number.isNaN(n) ? 0 : n
-}
-
-/** 数值步长：物模型未配则按类型给默认（int 1 / float 0.1） */
-const stepOf = (prop) => prop.step ?? (prop.type === 'int' ? 1 : 0.1)
-
-/** 输入框回传：拦住空值与 NaN，避免误下发 0 */
-function sendNumeric(prop, v) {
-  if (v === null || v === undefined || v === '') return
-  const n = Number(v)
-  if (Number.isNaN(n)) return
-  sendProperty(prop, n)
-}
-
-/** string 属性：仅「回车 / 点下发」触发，不再用 blur（切断切 tab、点别处导致的误发指令） */
-function sendString(prop) {
-  const v = strDraft[prop.key]
-  if (v === undefined || v === null || String(v).trim() === '') {
-    ElMessage.warning('请先输入要下发的值')
-    return
+/** 草稿初始值：以设备当前上报值为准，无值则退回类型默认 */
+function initDraft(p) {
+  const cur = props.telemetry[p.key]
+  if (p.type === 'bool') return isTruthy(cur)
+  if (p.type === 'int' || p.type === 'float') {
+    const n = Number(cur)
+    return Number.isNaN(n) ? p.min ?? 0 : n
   }
-  sendProperty(prop, String(v))
+  if (p.type === 'enum') return cur ?? (p.elements || [])[0]?.value ?? ''
+  return cur === undefined || cur === null ? '' : String(cur)
 }
 
-// 枚举当前值：与 elements 按字符串弱比较，规避遥测 1 与枚举 value 1（number）类型不一致导致的空显示
-function enumValue(key) {
-  const v = optimistic.value[key] ?? props.telemetry[key]
-  if (v === undefined || v === null || v === '') return ''
-  const prop = controls.value.find((p) => p.key === key)
-  const hit = (prop?.elements || []).find((e) => String(e.value) === String(v))
-  return hit ? hit.value : v
+watch(controls, (list) => {
+  list.forEach((p) => {
+    if (draft[p.key] === undefined) draft[p.key] = initDraft(p)
+  })
+}, { immediate: true, deep: true })
+
+/** 右侧「当前 xx」：设备实际值，便于对照用户填的值 */
+function curText(p) {
+  const v = props.telemetry[p.key]
+  if (v === undefined || v === null) return '未上报'
+  if (p.type === 'bool') return isTruthy(v) ? '开' : '关'
+  if (p.type === 'enum') {
+    const hit = (p.elements || []).find((e) => String(e.value) === String(v))
+    return hit ? hit.key : String(v)
+  }
+  return `${v}${p.unit || ''}`
 }
 
-// 遥测刷新到该键后释放乐观覆盖，恢复真实数据驱动；同时回填 string 输入草稿
-watch(() => props.telemetry, (t) => {
-  for (const key of Object.keys(optimistic.value)) {
-    if (key in t) delete optimistic.value[key]
-  }
-  for (const key of Object.keys(t)) {
-    if (strDraft[key] === undefined) strDraft[key] = String(t[key] ?? '')
-  }
-}, { deep: true, immediate: true })
+function toggle(key, v) {
+  const s = new Set(picked.value)
+  if (v) s.add(key)
+  else s.delete(key)
+  picked.value = [...s]
+}
 
-async function sendProperty(prop, value) {
-  sendingKey.value = prop.key
-  optimistic.value[prop.key] = value
-  const payload = { [prop.key]: value }
+function toggleAll(v) {
+  picked.value = v ? controls.value.map((p) => p.key) : []
+}
+
+function dispatchToast(name, status) {
+  if (status === 1) ElMessage.success(`已下发「${name}」`)
+  else if (status === 2) ElMessage.success(`「${name}」已执行`)
+  else if (status === 0) ElMessage.warning(`「${name}」待下发`)
+  else ElMessage.error(`「${name}」下发失败`)
+}
+
+/** 批量下发：勾选项的草稿值组装成一个 payload，一次发出 */
+async function submitPicked() {
+  if (!picked.value.length) return
+  const keys = picked.value.slice()
+  const payload = {}
+  keys.forEach((k) => { payload[k] = draft[k] })
+
+  sending.value = true
+  keys.forEach((k) => { optimistic.value[k] = draft[k] })
   try {
     const res = await dispatchCommand(props.deviceKey, 1, payload)
     lastCommand.value = res.data
-    dispatchToast(prop.name, res.data.status)
+    dispatchToast(`属性 ×${keys.length}`, res.data.status)
     emit('log', {
+      direction: 'down',
       requestId: res.data.request_id,
       action: '下发属性',
       actionType: 'primary',
@@ -272,10 +296,12 @@ async function sendProperty(prop, value) {
       request: { command_type: 1, payload },
       response: res.data
     })
-    startPolling(res.data.request_id, prop.key, value)
+    startPolling(res.data.request_id, payload)
+    picked.value = []
   } catch (e) {
-    delete optimistic.value[prop.key]
+    keys.forEach((k) => { delete optimistic.value[k] })
     emit('log', {
+      direction: 'down',
       action: '下发属性',
       actionType: 'danger',
       status: '下发失败',
@@ -284,7 +310,7 @@ async function sendProperty(prop, value) {
       response: { error: e?.message || '请求失败' }
     })
   } finally {
-    sendingKey.value = ''
+    sending.value = false
   }
 }
 
@@ -323,6 +349,7 @@ async function callService(svc, params) {
     lastCommand.value = res.data
     dispatchToast(`服务 ${svc.name}`, res.data.status)
     emit('log', {
+      direction: 'down',
       requestId: res.data.request_id,
       action: '调用服务',
       actionType: 'primary',
@@ -331,9 +358,10 @@ async function callService(svc, params) {
       request: { command_type: 2, payload },
       response: res.data
     })
-    startPolling(res.data.request_id)
+    startPolling(res.data.request_id, null)
   } catch (e) {
     emit('log', {
+      direction: 'down',
       action: '调用服务',
       actionType: 'danger',
       status: '调用失败',
@@ -346,13 +374,13 @@ async function callService(svc, params) {
   }
 }
 
-function startPolling(requestId, propKey, propValue) {
+/** 轮询指令状态；values 为本次下发的属性值，用于成功后本地回填 */
+function startPolling(requestId, values) {
   if (statusTimer) clearInterval(statusTimer)
   statusTimer = setInterval(async () => {
     try {
       const res = await getCommandStatus(requestId)
       lastCommand.value = res.data
-      // 指令生命周期回填日志：0/1 → 2/3/4 的状态跃迁在调试日志里可见
       emit('log-status', {
         requestId,
         status: statusLabel(res.data.status),
@@ -360,13 +388,11 @@ function startPolling(requestId, propKey, propValue) {
         response: res.data
       })
       if (res.data.status === 2) {
-        // 设备已执行 → 乐观更新本地状态，不等下一次遥测轮询
-        if (propKey !== undefined) emit('executed', { key: propKey, value: propValue })
+        if (values) emit('executed', values)
         clearInterval(statusTimer)
         statusTimer = null
       } else if ([3, 4].includes(res.data.status)) {
-        // 失败/超时 → 回滚乐观覆盖
-        if (propKey !== undefined) delete optimistic.value[propKey]
+        if (values) Object.keys(values).forEach((k) => { delete optimistic.value[k] })
         clearInterval(statusTimer)
         statusTimer = null
       }
@@ -394,6 +420,81 @@ onBeforeUnmount(() => {
   padding: 30px 0;
 }
 
+.cp-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.cp-count {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.cp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cp-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 6px;
+  border-radius: 6px;
+  border-bottom: 1px dashed #f0f2f5;
+}
+
+.cp-row.picked {
+  background: #f6faff;
+}
+
+.cp-check {
+  flex-shrink: 0;
+}
+
+.cp-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: #374151;
+}
+
+.cp-label small {
+  display: block;
+  font-size: 11px;
+  color: #b0b8c4;
+  font-family: Consolas, monospace;
+}
+
+.cp-widget {
+  flex-shrink: 0;
+}
+
+.cp-cur {
+  font-size: 12px;
+  color: #9ca3af;
+  font-family: Consolas, monospace;
+  white-space: nowrap;
+  min-width: 74px;
+  text-align: right;
+}
+
+.cp-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.cp-tip {
+  font-size: 11px;
+  color: #b0b8c4;
+}
+
 .ctrl-row {
   display: flex;
   align-items: center;
@@ -406,24 +507,16 @@ onBeforeUnmount(() => {
   border-bottom: none;
 }
 
-/* 数值属性：滑块旁挂精确输入框（滑块适合粗调，输入框适合精确值） */
-.num-wrap {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.ctrl-label {
+  font-size: 13px;
+  color: #374151;
 }
 
-/* 数值属性输入框：范围不兜底 —— 物模型没配 min/max 就不限制（曾把「大气压 1013」卡在 100 上） */
-.num-input {
-  width: 140px;
-  flex-shrink: 0;
-}
-
-/* string 属性：输入框 + 显式下发按钮 */
-.str-wrap {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.ctrl-label small {
+  display: block;
+  font-size: 11px;
+  color: #b0b8c4;
+  font-family: Consolas, monospace;
 }
 
 .svc-hint {
@@ -439,94 +532,64 @@ onBeforeUnmount(() => {
   font-family: Consolas, monospace;
 }
 
-.ctrl-label {
-  font-size: 13px;
-  color: #1f2937;
-}
-
-.ctrl-label small {
-  display: block;
-  color: #9ca3af;
-  font-size: 11px;
-  margin-top: 2px;
-  font-family: Consolas, monospace;
-}
-
-.ctrl-widget {
-  display: flex;
-  align-items: center;
-}
-
-.num-cur {
-  font-size: 12px;
-  color: #6b7280;
-  font-family: Consolas, monospace;
-  white-space: nowrap;
-}
-
 .ctrl-divider {
   font-size: 12px;
   color: #9ca3af;
-  margin: 10px 0 4px;
-  padding-top: 10px;
-  border-top: 1px solid #f1f4f9;
+  margin: 18px 0 4px;
+  padding-top: 12px;
+  border-top: 1px solid #f0f2f5;
 }
 
 .cmd-status {
-  margin-top: 14px;
-  border: 1px dashed #e5eaf2;
-  border-radius: 8px;
-  padding: 10px 12px;
-  background: #fbfcfe;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #f0f2f5;
 }
 
 .cmd-status-title {
   font-size: 12px;
-  color: #6b7280;
-  margin-bottom: 6px;
+  color: #9ca3af;
+  margin-bottom: 8px;
 }
 
 .cmd-flow {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .badge {
-  display: inline-block;
-  padding: 2px 10px;
-  border-radius: 4px;
   font-size: 12px;
-}
-
-.badge.pending {
-  background: #fef3c7;
-  color: #92400e;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
 }
 
 .badge.sent {
-  background: #dbeafe;
-  color: #1e40af;
+  background: #eff6ff;
+  color: #1d4ed8;
 }
 
 .badge.done {
-  background: #dcfce7;
-  color: #166534;
+  background: #ecfdf5;
+  color: #047857;
 }
 
-.badge.failed {
-  background: #fee2e2;
-  color: #991b1b;
-}
-
+.badge.failed,
 .badge.timeout {
-  background: #f3e8ff;
-  color: #6b21a8;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.badge.pending {
+  background: #fffbeb;
+  color: #b45309;
 }
 
 .cmd-req {
-  font-size: 11px;
-  color: #9ca3af;
+  font-size: 12px;
+  color: #b0b8c4;
   font-family: Consolas, monospace;
 }
 </style>
