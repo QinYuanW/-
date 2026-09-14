@@ -116,3 +116,17 @@ CREATE TABLE IF NOT EXISTS device_alarm (
   KEY idx_device_time (device_id, created_at),
   KEY idx_status_time (status, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- E3 事件通道：设备主动上报的事件（MQTT up/{device_key}/event → EMQX 规则 → POST /api/v1/events）。
+-- event_key 对应物模型 events[].key；展示名与类型不入库，查询时按产品 TSL 回填（避免 TSL 改动导致历史数据不一致）。
+CREATE TABLE IF NOT EXISTS device_event (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  device_id BIGINT UNSIGNED NOT NULL,
+  event_key VARCHAR(64) NOT NULL,
+  params JSON NULL COMMENT '事件参数原文',
+  ts DATETIME(3) NOT NULL COMMENT '事件发生时间',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  KEY idx_device_ts (device_id, ts),
+  KEY idx_device_event_ts (device_id, event_key, ts)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
