@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>竞品对比分析 · 开源私有化象限（巴法云 / FastBee / JetLinks / 本平台）</title>
+<style>
+  :root{
+    --bg:#f5f7fb; --card:#ffffff; --ink:#0f172a; --sub:#475569; --line:#e2e8f0;
+    --bemfa:#0ea5e9; --fastbee:#f59e0b; --jetlinks:#8b5cf6; --ours:#10b981;
+    --ok:#10b981; --part:#f59e0b; --no:#cbd5e1;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
+    line-height:1.65; font-size:14px;
+  }
+  .wrap{max-width:1180px; margin:0 auto; padding:36px 24px 72px;}
+  header.hero{
+    background:linear-gradient(120deg,#0f172a 0%,#1e293b 55%,#0e7490 100%);
+    color:#f8fafc; border-radius:16px; padding:34px 36px; margin-bottom:28px;
+    box-shadow:0 10px 30px rgba(15,23,42,.18);
+  }
+  header.hero h1{margin:0 0 8px; font-size:26px; letter-spacing:.5px;}
+  header.hero .sub{color:#94a3b8; font-size:13.5px;}
+  header.hero .tagline{
+    margin-top:16px; padding-top:16px; border-top:1px solid rgba(255,255,255,.14);
+    color:#e2e8f0; font-size:14px;
+  }
+  header.hero .tagline b{color:#5eead4;}
+  h2.sec{
+    font-size:18px; margin:38px 0 14px; padding-left:12px;
+    border-left:4px solid var(--ours); line-height:1.2;
+  }
+  h2.sec small{display:block; font-weight:400; color:var(--sub); font-size:12.5px; margin-top:4px; padding-left:1px;}
+  .grid3{display:grid; grid-template-columns:repeat(3,1fr); gap:16px;}
+  .pcard{
+    background:var(--card); border-radius:14px; padding:20px 20px 18px;
+    border:1px solid var(--line); position:relative; overflow:hidden;
+    box-shadow:0 2px 8px rgba(15,23,42,.04);
+  }
+  .pcard::before{content:""; position:absolute; inset:0 0 auto 0; height:4px; background:var(--c);}
+  .pcard .name{font-size:16px; font-weight:700; color:var(--c);}
+  .pcard .role{font-size:12px; color:#fff; background:var(--c); display:inline-block;
+    padding:2px 9px; border-radius:20px; margin:8px 0 12px;}
+  .pcard p{margin:0 0 8px; color:var(--sub); font-size:13px;}
+  .pcard .kw{font-size:12.5px; color:#334155;}
+  .pcard .kw b{color:var(--ink);}
+  table{width:100%; border-collapse:collapse; background:var(--card); border-radius:12px;
+    overflow:hidden; box-shadow:0 2px 10px rgba(15,23,42,.05); font-size:13px;}
+  thead th{
+    background:#0f172a; color:#f1f5f9; text-align:left; padding:11px 12px;
+    font-weight:600; font-size:12.5px; white-space:nowrap;
+  }
+  thead th.ours{background:#065f46; color:#d1fae5;}
+  tbody td{padding:10px 12px; border-top:1px solid var(--line); vertical-align:top; color:#334155;}
+  tbody tr:nth-child(even) td{background:#fafbfe;}
+  tbody td:first-child{font-weight:600; color:var(--ink); white-space:nowrap; background:#f1f5f9;}
+  tbody tr:nth-child(even) td:first-child{background:#eef2f8;}
+  td.ours{background:#f0fdf9 !important; color:#065f46; font-weight:500;}
+  .s{display:inline-block; padding:1px 7px; border-radius:20px; font-size:11.5px; font-weight:600; white-space:nowrap;}
+  .s.y{background:#d1fae5; color:#047857;}
+  .s.p{background:#fef3c7; color:#b45309;}
+  .s.n{background:#e2e8f0; color:#64748b;}
+  .spectrum{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:20px; box-shadow:0 2px 8px rgba(15,23,42,.04);}
+  .note{background:#fffbeb; border-left:4px solid var(--fastbee); border-radius:8px;
+    padding:14px 18px; margin:16px 0; font-size:13.5px; color:#78350f;}
+  .note.blue{background:#eff6ff; border-left-color:#2563eb; color:#1e3a8a;}
+  .note.green{background:#ecfdf5; border-left-color:var(--ours); color:#065f46;}
+  ol.ins{padding-left:22px;} ol.ins li{margin-bottom:12px; font-size:13.5px;}
+  ol.ins li b{color:var(--ours);}
+  .chain{display:flex; flex-wrap:wrap; gap:8px; margin:14px 0;}
+  .chain span{background:#0f172a; color:#e2e8f0; padding:7px 13px; border-radius:8px; font-size:12.5px;}
+  .chain span.arrow{background:transparent; color:#94a3b8; padding:7px 2px;}
+  footer{margin-top:40px; color:#94a3b8; font-size:12px; text-align:center;}
+  @media(max-width:900px){.grid3{grid-template-columns:1fr;} .wrap{padding:20px 14px 50px;}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>竞品对比分析 · 开源私有化象限</h1>
+  <div class="sub">巴法云 ｜ 蜂信物联 FastBee ｜ JetLinks ｜ 本平台 YunPingTai &nbsp;·&nbsp; 2026-09-14 &nbsp;·&nbsp; 补充《需求分析文档》§6</div>
+  <div class="tagline">
+    需求文档 §6 把竞品圈在了 <b>OneNET / 阿里云 / 腾讯云 / 华为云</b> —— 那是"公有云大厂"象限。
+    但汤园这次问的三家，全在另一个象限：<b>开源 + 可私有化 + 轻量</b>。
+    那才是我们真正会被拿去做 A/B 对比的对手。这份看板把两个象限分开摆。
+  </div>
+</header>
+
+<h2 class="sec">一、三家不是一个物种：物联网平台的三个"海拔"<small>看似都在做 IoT 平台，其实生态位从水平到垂直完全错开</small></h2>
+<div class="grid3">
+  <div class="pcard" style="--c:var(--bemfa)">
+    <div class="name">巴法云 · bemfa</div>
+    <div class="role">山脚的缆车 · 通信管道</div>
+    <p>只负责"把设备连上"，不做设备管理。MQTT/TCP 双向中继，三步接入，免费 10 设备 / 10 主题。</p>
+    <div class="kw">
+      <b>本质：</b>免运维的 MQTT 消息中继<br>
+      <b>商业模式：</b>免费额度 + ¥9/设备/月起<br>
+      <b>用户：</b>创客 / 学生 / 毕设原型 / DIY<br>
+      <b>短板：</b>无物模型、无规则引擎、无多租户
+    </div>
+  </div>
+  <div class="pcard" style="--c:var(--fastbee)">
+    <div class="name">FastBee · 蜂信物联</div>
+    <div class="role">山腰的全包民宿 · 开箱即用交付</div>
+    <p>单体 SpringBoot + Vue，一条龙从小程序到组态大屏。已服务 200+ 企业，主打"快上线、低成本、能自己改"。</p>
+    <div class="kw">
+      <b>本质：</b>一体化交付平台<br>
+      <b>商业模式：</b>开源（个人学习）+ 商业永久授权<br>
+      <b>用户：</b>中小企业 / 个人开发者<br>
+      <b>短板：</b>规则引擎弱、仪表盘不如 ThingsBoard 灵活
+    </div>
+  </div>
+  <div class="pcard" style="--c:var(--jetlinks)">
+    <div class="name">JetLinks</div>
+    <div class="role">山顶的自建地基 · 企业级技术底座</div>
+    <p>全响应式 Java17 + WebFlux + Reactor，统一物模型 + 可视化规则设计器 + 三维数据权限，面向"自建物联中台"。</p>
+    <div class="kw">
+      <b>本质：</b>企业级 IoT 技术底座<br>
+      <b>商业模式：</b>社区版 + 企业版 + SaaS + Edge<br>
+      <b>用户：</b>大集团 / 有完整研发团队的团队<br>
+      <b>短板：</b>只给底座，看板/告警/小程序要自己开发
+    </div>
+  </div>
+</div>
+
+<div class="note blue" style="margin-top:18px">
+  <b>一句话记住三者的区别：</b>巴法云卖"连得上"，FastBee 卖"开得快"，JetLinks 卖"撑得住"。
+  三家的付费理由不同，说明它们解决的是三种不同的焦虑 —— 这也决定了它们的功能取舍。
+</div>
+
+<h2 class="sec">二、维度对比总表<small>✅ 已具备 · 🟡 部分／计划中 · ❌ 不提供</small></h2>
+<table>
+<thead>
+<tr>
+  <th>维度</th>
+  <th style="color:#7dd3fc">巴法云</th>
+  <th style="color:#fcd34d">FastBee</th>
+  <th style="color:#c4b5fd">JetLinks</th>
+  <th class="ours">本平台 YunPingTai</th>
+</tr>
+</thead>
+<tbody>
+<tr><td>一句话定位</td><td>MQTT/TCP 消息中继</td><td>一体化交付平台</td><td>企业级技术底座</td><td class="ours">架构决策有数据支撑的自研平台</td></tr>
+<tr><td>目标用户</td><td>创客 / 学生</td><td>中小企业</td><td>大集团自建中台</td><td class="ours">毕设答辩 + 面试叙事</td></tr>
+<tr><td>后端栈</td><td>托管云服务</td><td>SpringBoot（单体）</td><td>Java17 + SpringBoot3 + WebFlux + Reactor + R2DBC</td><td class="ours">SpringBoot 3.2 单体 + MyBatis-Plus</td></tr>
+<tr><td>架构风格</td><td>分布式消息中继</td><td>单体</td><td>全响应式，可集群</td><td class="ours">单体 + 异步消息链路（Kafka）</td></tr>
+<tr><td>MQTT Broker</td><td>自有托管</td><td>内置 Netty（可选 EMQX）</td><td>网络组件（MQTT/TCP/CoAP…）</td><td class="ours">外挂 EMQX 5.8（独立可换）</td></tr>
+<tr><td>协议支持</td><td>MQTT 3.1.1（QoS0/1）+ TCP</td><td>MQTT/TCP/Modbus/GB28181/CoAP/JT808</td><td>TCP/UDP/MQTT/HTTP/CoAP/WS + Modbus/OPC-UA</td><td class="ours">MQTT（多协议有意暂缓）</td></tr>
+<tr><td>物模型 TSL</td><td><span class="s n">无</span></td><td><span class="s y">有</span></td><td><span class="s y">属性/功能/事件/标签</span></td><td class="ours"><span class="s y">有（E5 ✅）</span></td></tr>
+<tr><td>设备影子</td><td><span class="s n">无</span></td><td><span class="s p">未明确</span></td><td><span class="s y">有（期望值/物模型）</span></td><td class="ours"><span class="s y">有（E1 ✅ 含语义分家）</span></td></tr>
+<tr><td>命令下行 / 状态机</td><td>纯主题推送（/set）</td><td><span class="s y">有</span></td><td><span class="s y">有</span></td><td class="ours"><span class="s y">0→1→2/3/4 + 期望值补发 ✅</span></td></tr>
+<tr><td>规则引擎</td><td><span class="s n">无</span></td><td><span class="s p">基础（场景联动/规则脚本/MQTT 桥接）</span></td><td><span class="s y">强（可视化设计器，node-red 式）</span></td><td class="ours"><span class="s p">E3 计划中</span></td></tr>
+<tr><td>数据存储</td><td>云端托管</td><td>MySQL + Redis + TDengine/IoTDB/Influx</td><td>PostgreSQL + Redis + ES + 时序库三选一</td><td class="ours">MySQL 5.7 + Redis 7.2（TDengine 待迁移）</td></tr>
+<tr><td>消息队列</td><td>—</td><td>EMQX / 内置 Broker</td><td>Redis 消息</td><td class="ours">Kafka（幂等 + 背压 ✅）</td></tr>
+<tr><td>可观测性</td><td>仅控制台调试 + 7 天历史</td><td>系统监控</td><td>仪表盘（CPU/JVM/磁盘）</td><td class="ours">Prometheus + Grafana + Alertmanager + 飞书告警</td></tr>
+<tr><td>多租户 / 权限</td><td><span class="s n">无</span></td><td><span class="s p">商业版</span></td><td><span class="s y">三维数据权限（菜单/按钮/数据）</span></td><td class="ours"><span class="s p">F4 计划中（RBAC 暂缓）</span></td></tr>
+<tr><td>可视化 / 组态</td><td><span class="s n">无</span></td><td><span class="s p">大屏 + 组态（独立付费模块）</span></td><td><span class="s y">大屏/组态/3D/报表设计器</span></td><td class="ours"><span class="s p">Vue3 控制台 + Grafana 运维盘（拖拽盘暂缓）</span></td></tr>
+<tr><td>实时推送前端</td><td>App/小程序收主题</td><td><span class="s y">Uniapp 多端</span></td><td><span class="s y">有</span></td><td class="ours"><span class="s p">E2 WebSocket ⬜ 下一站</span></td></tr>
+<tr><td>移动端</td><td>官方 App / 小程序</td><td>小程序/安卓/iOS/H5</td><td>官方 App</td><td class="ours"><span class="s n">无</span></td></tr>
+<tr><td>视频接入</td><td><span class="s n">无</span></td><td><span class="s y">GB28181 + ZLMediaKit</span></td><td><span class="s y">GB28181</span></td><td class="ours"><span class="s n">无</span></td></tr>
+<tr><td>OTA</td><td><span class="s p">有示例，非平台化</span></td><td><span class="s y">有</span></td><td><span class="s y">有（固件版本 + 签名）</span></td><td class="ours"><span class="s p">F 阶段计划</span></td></tr>
+<tr><td>AI 能力</td><td><span class="s n">无</span></td><td><span class="s p">智能音箱云云对接（付费）</span></td><td><span class="s y">视觉 100+ 算法 + 大模型复判</span></td><td class="ours"><span class="s n">无</span></td></tr>
+<tr><td>成熟度 / 案例</td><td>1000+ 企业客户（官网口径）</td><td>200+ 企业</td><td>350+ 企业 / 7 年沉淀</td><td class="ours">毕设原型 → 生产级演进中</td></tr>
+<tr><td>证据链</td><td><span class="s n">无</span></td><td><span class="s n">无</span></td><td><span class="s n">无</span></td><td class="ours"><span class="s y">⭐ 压测报告 / 评审报告 / 实验报告</span></td></tr>
+</tbody>
+</table>
+
+<h2 class="sec">三、生态位光谱<small>横轴＝平台重量与技术门槛，纵轴＝交付完整度</small></h2>
+<div class="spectrum">
+<svg viewBox="0 0 1000 420" width="100%" height="auto" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Microsoft YaHei, sans-serif">
+  <defs>
+    <linearGradient id="band" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#e0f2fe"/><stop offset="50%" stop-color="#fef3c7"/><stop offset="100%" stop-color="#ede9fe"/>
+    </linearGradient>
+  </defs>
+  <rect x="70" y="30" width="860" height="300" fill="url(#band)" rx="10" opacity="0.55"/>
+  <!-- axes -->
+  <line x1="70" y1="330" x2="930" y2="330" stroke="#94a3b8" stroke-width="2"/>
+  <line x1="70" y1="30" x2="70" y2="330" stroke="#94a3b8" stroke-width="2"/>
+  <text x="300" y="360" fill="#64748b" font-size="13" text-anchor="middle">轻量 / 低门槛</text>
+  <text x="800" y="360" fill="#64748b" font-size="13" text-anchor="middle">重量 / 高技术门槛</text>
+  <text x="52" y="185" fill="#64748b" font-size="13" transform="rotate(-90 52 185)" text-anchor="middle">交付完整度</text>
+
+  <!-- bemfa -->
+  <circle cx="160" cy="290" r="11" fill="#0ea5e9"/>
+  <text x="182" y="286" fill="#0369a1" font-size="14" font-weight="700">巴法云</text>
+  <text x="182" y="304" fill="#475569" font-size="11.5">管道 · 极简 · 平台能力近乎为零</text>
+
+  <!-- fastbee -->
+  <circle cx="470" cy="120" r="11" fill="#f59e0b"/>
+  <text x="492" y="116" fill="#b45309" font-size="14" font-weight="700">FastBee</text>
+  <text x="492" y="134" fill="#475569" font-size="11.5">单体 · 交付最完整 · 定制深度有限</text>
+
+  <!-- jetlinks -->
+  <circle cx="830" cy="90" r="11" fill="#8b5cf6"/>
+  <text x="700" y="60" fill="#6d28d9" font-size="14" font-weight="700">JetLinks</text>
+  <text x="700" y="78" fill="#475569" font-size="11.5">响应式底座 · 高门槛 · 自建中台</text>
+
+  <!-- ours -->
+  <circle cx="600" cy="255" r="13" fill="#10b981" stroke="#065f46" stroke-width="2"/>
+  <text x="622" y="250" fill="#047857" font-size="14" font-weight="700">本平台（当前）</text>
+  <text x="622" y="268" fill="#475569" font-size="11.5">架构深度已在线，功能覆盖度仍在追赶</text>
+  <!-- target arrow -->
+  <line x1="600" y1="255" x2="660" y2="175" stroke="#10b981" stroke-width="2" stroke-dasharray="6 5"/>
+  <polygon points="660,175 653,187 668,185" fill="#10b981"/>
+  <text x="672" y="196" fill="#047857" font-size="11.5">补齐 E2/E6/E3 后</text>
+</svg>
+<div class="note green" style="margin:16px 0 0">
+  <b>读图要点：</b>我们在"技术门槛"轴已经爬到 JetLinks 附近（Kafka 幂等/背压、EMQX 认证回调、TDengine 迁移评审都属于这个量级），
+  但在"交付完整度"轴上还在 FastBee 之下 —— 差距集中在<b>实时推送、规则引擎、统计接口、多租户、OTA</b> 这五块。
+</div>
+</div>
+
+<h2 class="sec">四、我们真正的差异化在哪<small>不是功能多少，而是"为什么这么设计"能不能拿出数据</small></h2>
+<div class="chain">
+  <span>324 msg/s 打到 MySQL 写瓶颈</span><span class="arrow">→</span>
+  <span>立项 Kafka（D1）</span><span class="arrow">→</span>
+  <span>发现 MANUAL ack 会越位丢数据（BUG-21）</span><span class="arrow">→</span>
+  <span>改 RECORD + 阶梯重试 + DLT（D2）</span><span class="arrow">→</span>
+  <span>TDengine 迁移评审（D3）</span>
+</div>
+<table>
+<thead><tr><th>维度</th><th>巴法云</th><th>FastBee</th><th>JetLinks</th><th class="ours">我们</th></tr></thead>
+<tbody>
+<tr><td>功能覆盖度</td><td>低</td><td>高</td><td>极高</td><td class="ours">低（<b>有意 descope</b>，有范围声明）</td></tr>
+<tr><td>架构深度</td><td>无</td><td>中</td><td>高</td><td class="ours">高（异步链路 + 幂等 + 背压）</td></tr>
+<tr><td>决策可追溯</td><td>—</td><td>—</td><td>—</td><td class="ours"><b>⭐ 每步都有对比报告</b></td></tr>
+<tr><td>部署自由度</td><td>仅 SaaS</td><td>私有化</td><td>开源/私有化/Edge/SaaS</td><td class="ours">Docker Compose 私有化</td></tr>
+<tr><td>生态绑定</td><td>中立</td><td>中立</td><td>中立</td><td class="ours">中立</td></tr>
+<tr><td>商业化</td><td>按设备付费</td><td>卖源码 + 授权</td><td>卖源码 + 定制</td><td class="ours">无（毕设，不参与竞争）</td></tr>
+</tbody>
+</table>
+
+<h2 class="sec">五、五条关键洞察<small>面试 / 答辩直接可用</small></h2>
+<ol class="ins">
+<li><b>真正的对手不是大厂云，是 FastBee 和 JetLinks。</b>需求文档 §6 对比的是 OneNET/阿里/腾讯/华为（公有云象限），但"开源可私有化"象限里，FastBee/JetLinks 才是抢同一批客群的直接替代品。答辩时如果被问"市面上已经有 FastBee 了你还做什么"，答案要在这一条上。</li>
+<li><b>不要在功能覆盖度上硬碰。</b>FastBee 有 GB28181 视频 + Uniapp 多端 + 组态大屏，JetLinks 有响应式集群 + AI 视觉 + 三维权限。这两家是团队多年沉淀，单人毕设堆功能只会样样稀松。范围声明里"有意暂缓"是<b>战略选择</b>，不是能力不足 —— 这句话必须说出口。</li>
+<li><b>我们唯一能赢的护城河是"证据链"。</b>JetLinks 是空白底座（怎么用是你的事），FastBee 是黑盒交付（怎么做到的不告诉你），巴法云根本不做平台层。而我们能拿出"发现瓶颈 → 量化 → 选型 → 验证"的完整链路，这是面试官真正想听的。</li>
+<li><b>最短的差距补齐路径：E2 → E6 → E3。</b>E2 WebSocket 是三家的标配而我们是空白，形态上最刺眼；E6 统计接口是 D3/D5 报告里"查询 RT"的唯一基线；E3 规则引擎补完才配叫"平台"而不是"管道"。三者有严格先后依赖，不要并行。</li>
+<li><b>三家的商业模式值得抄一句。</b>巴法云证明"最后一公里连通性"本身就是生意；FastBee 证明"完整 + 私有化 + 中文文档"能卖给中小企业；JetLinks 证明"帮你摆脱厂商锁定"能卖给大厂。毕设不需要变现，但答辩里能讲清"这个平台该卖给谁、凭什么收费"，是产品思维的加分项。</li>
+</ol>
+
+<div class="note">
+  <b>⚠️ 数据口径声明：</b>三家的能力项来自官网与公开文档（2026-09 检索），其中 FastBee 的设备影子、JetLinks 的影子实现细节属于"未公开明示"，
+  表中已标注为"未明确"而非"无"。正式写入论文或答辩 PPT 前，建议对存疑项做一次实机验证或官方文档二次核对，避免被答辩老师追问细节时站不住。
+</div>
+
+<footer>YunPingTai 项目 · 需求规划阶段产出 · 生成于 2026-09-14 · 补充《物联网PaaS云平台需求分析文档》§6 竞品分析</footer>
+</div>
+</body>
+</html>
