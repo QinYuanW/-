@@ -33,7 +33,8 @@
 
       <section class="panel">
         <div class="panel-title">告警类型</div>
-        <div class="panel-empty">
+        <div v-if="alarmTypes.length" ref="typeEl" class="type-chart"></div>
+        <div v-else class="panel-empty">
           <el-empty description="暂无告警数据" :image-size="70" />
         </div>
       </section>
@@ -93,7 +94,10 @@ const overview = reactive({
 
 const messageTrend = reactive({ months: [], message: [], warn: [] })
 const alarmList = ref([])
+const alarmTypes = ref([])      // 告警类型分布（取自 /alerts 的 types 段）
 const loading = ref(false)
+const typeEl = ref()
+let typeChart = null
 
 /** 通知趋势图重绘（数据是异步到的，initTrend 时可能还是空的） */
 const trendReady = ref(false)
@@ -223,6 +227,7 @@ function initTrend() {
 
 function onResize() {
   chart && chart.resize()
+  typeChart && typeChart.resize()
 }
 
 async function loadDashboard() {
@@ -253,6 +258,7 @@ async function loadDashboard() {
       status: a.status,
       alarmAt: a.alarm_at
     }))
+    alarmTypes.value = alarms.data?.types || []
     trendReady.value = true
   } catch (e) {
     // 拦截器已提示；保留空态渲染，不阻塞页面
@@ -261,15 +267,37 @@ async function loadDashboard() {
   }
 }
 
+/** 告警类型分布（环形图）—— 数据取自 /alerts 的 types 段 */
+function initTypeChart() {
+  if (!typeEl.value || !alarmTypes.value.length) return
+  typeChart = echarts.init(typeEl.value)
+  typeChart.setOption({
+    tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+    legend: { bottom: 0, icon: 'circle', textStyle: { color: '#6b7280', fontSize: 12 } },
+    color: ['#f09595', '#ef9f27', '#85b7eb', '#97c459'],
+    series: [{
+      type: 'pie',
+      radius: ['46%', '68%'],
+      center: ['50%', '44%'],
+      avoidLabelOverlap: true,
+      itemStyle: { borderColor: '#fff', borderWidth: 2 },
+      label: { formatter: '{b} {c}', color: '#6b7280', fontSize: 11 },
+      data: alarmTypes.value.map((t) => ({ name: t.name, value: Number(t.count) }))
+    }]
+  })
+}
+
 // 必须先取数再画图：否则 xAxis/series 拿到的是空数组，图表会是空白
 onMounted(async () => {
   await loadDashboard()
   initTrend()
+  initTypeChart()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)
   chart && chart.dispose()
+  typeChart && typeChart.dispose()
 })
 </script>
 
@@ -393,6 +421,11 @@ onBeforeUnmount(() => {
 }
 
 .trend-chart {
+  height: 260px;
+}
+
+/* 告警类型环形图：与左侧趋势图同高，两栏视觉对齐 */
+.type-chart {
   height: 260px;
 }
 
