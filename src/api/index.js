@@ -69,6 +69,13 @@ export const getLatestTelemetry = (deviceKey) =>
 export const getHistoryTelemetry = (deviceKey, property, start, end) =>
   http.get(`/devices/${deviceKey}/telemetry`, { params: { property, start, end } })
 
+// ===== 调试台：模拟设备上报 =====
+// 复用 EMQX 规则引擎回调的同一接口（/telemetry 在 JWT 放行清单内），
+// 前端伪造一条上报即可走通完整链路：Kafka → 入库 → 影子对齐 → 在线状态刷新。
+
+export const mockReportTelemetry = (data) =>
+  http.post('/telemetry', data)
+
 export const dispatchCommand = (deviceKey, commandType, payload) =>
   http.post(`/devices/${deviceKey}/commands`, { command_type: commandType, payload })
 
