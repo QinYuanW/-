@@ -68,6 +68,22 @@
           :value="p.product_key"
         />
       </el-select>
+      <!-- E4：按分组筛选（null=全部分组，0=未分组，>0=具体分组） -->
+      <el-select
+        v-model="groupFilter"
+        class="tool-select wide"
+        placeholder="全部分组"
+        @change="handleFilter"
+      >
+        <el-option label="全部分组" :value="null" />
+        <el-option label="未分组" :value="0" />
+        <el-option
+          v-for="g in groups"
+          :key="g.id"
+          :label="`${g.name}（${g.deviceCount}）`"
+          :value="g.id"
+        />
+      </el-select>
 
       <div class="tool-spacer" />
 
@@ -89,7 +105,9 @@
         </el-button>
         <template #dropdown>
           <el-dropdown-menu>
-            <el-dropdown-item command="delete" :disabled="!selectedKeys.length">批量删除</el-dropdown-item>
+            <el-dropdown-item command="move-group" :disabled="!selectedKeys.length">移入分组…</el-dropdown-item>
+            <el-dropdown-item command="ungroup" :disabled="!selectedKeys.length">移出分组</el-dropdown-item>
+            <el-dropdown-item command="delete" divided :disabled="!selectedKeys.length">批量删除</el-dropdown-item>
             <el-dropdown-item command="export" :disabled="!selectedKeys.length">导出选中</el-dropdown-item>
           </el-dropdown-menu>
         </template>
@@ -127,6 +145,23 @@
       @selection-change="handleSelectionChange"
     />
 
+    <!-- E4：批量移入分组 -->
+    <el-dialog v-model="moveDialogVisible" title="移入分组" width="420px">
+      <el-select v-model="moveTargetGroup" class="move-select" placeholder="选择目标分组">
+        <el-option
+          v-for="g in groups"
+          :key="g.id"
+          :label="`${g.name}（当前 ${g.deviceCount} 台）`"
+          :value="g.id"
+        />
+      </el-select>
+      <div class="move-tip">将把已选中的 {{ selectedKeys.length }} 台设备移入该分组（原分组归属会被覆盖）</div>
+      <template #footer>
+        <el-button @click="moveDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="moving" @click="confirmMoveGroup">确定</el-button>
+      </template>
+    </el-dialog>
+
     <DeviceRegister ref="registerRef" :show-button="false" @registered="loadDevices" />
     <BatchListDialog ref="batchListRef" />
   </div>
@@ -134,20 +169,28 @@
 
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Plus, Operation, Download, Tickets, Grid, List } from '@element-plus/icons-vue'
-import { listDevices, listProducts, deleteDevices } from '../api'
+import {
+  listDevices,
+  listProducts,
+  deleteDevices,
+  listDeviceGroups,
+  assignDevicesToGroup
+} from '../api'
 import { downloadCsv, formatTime } from '../utils/export'
 import DeviceCards from '../components/DeviceCards.vue'
 import DeviceList from '../components/DeviceList.vue'
 import DeviceRegister from '../components/DeviceRegister.vue'
 import BatchListDialog from '../components/BatchListDialog.vue'
 
+const route = useRoute()
 const router = useRouter()
 
 const devices = ref([])
 const products = ref([])
+const groups = ref([])
 const loading = ref(false)
 const page = ref(1)
 const size = ref(20)
@@ -155,9 +198,16 @@ const total = ref(0)
 const keyword = ref('')
 const statusFilter = ref(0)
 const productKey = ref('')
+// E4：分组筛选（null=全部分组 / 0=未分组 / >0=具体分组）
+const groupFilter = ref(null)
 const selectedKeys = ref([])
 const viewMode = ref('card')
 const stats = ref({ total: 0, online: 0, offline: 0, products: 0 })
+
+// E4：批量移入分组
+const moveDialogVisible = ref(false)
+const moveTargetGroup = ref(null)
+const moving = ref(false)
 
 const listRef = ref()
 const registerRef = ref()
@@ -168,13 +218,28 @@ const EXPORT_LIMIT = 5000
 async function loadDevices() {
   loading.value = true
   try {
-    const res = await listDevices(page.value, size.value, keyword.value, productKey.value, statusFilter.value)
+    const res = await listDevices(
+      page.value,
+      size.value,
+      keyword.value,
+      productKey.value,
+      statusFilter.value,
+      groupFilter.value
+    )
     devices.value = res.data.items || []
     total.value = res.data.total || 0
   } catch (e) {
     devices.value = []
   } finally {
     loading.value = false
+  }
+}
+
+async function loadGroups() {
+  try {
+    groups.value = (await listDeviceGroups()).data.items || []
+  } catch {
+    groups.value = []
   }
 }
 
@@ -257,6 +322,43 @@ async function handleBatchAction(command) {
     await doDelete(selectedKeys.value)
   } else if (command === 'export') {
     exportRows(devices.value.filter((d) => selectedKeys.value.includes(d.device_key)))
+  } else if (command === 'move-group') {
+    moveTargetGroup.value = null
+    moveDialogVisible.value = true
+  } else if (command === 'ungroup') {
+    await doAssign(0, '已移出分组')
+  }
+}
+
+/**
+ * E4：把选中设备分配到某分组。
+ * @param {number} groupId 0 或 null = 移出分组（回到「未分组」）
+ */
+async function doAssign(groupId, okMsg) {
+  if (!selectedKeys.value.length) return
+  try {
+    const res = await assignDevicesToGroup(groupId ?? 0, selectedKeys.value)
+    ElMessage.success(`${okMsg}（${res.data.affected} 台）`)
+    listRef.value?.clearSelection?.()
+    selectedKeys.value = []
+    // 设备的分组归属变了 → 列表与分组计数都要刷新
+    await Promise.all([loadDevices(), loadGroups()])
+  } catch (e) {
+    // 拦截器已提示
+  }
+}
+
+async function confirmMoveGroup() {
+  if (!moveTargetGroup.value) {
+    ElMessage.warning('请先选择目标分组')
+    return
+  }
+  moving.value = true
+  try {
+    await doAssign(moveTargetGroup.value, '已移入分组')
+    moveDialogVisible.value = false
+  } finally {
+    moving.value = false
   }
 }
 
@@ -322,8 +424,14 @@ function exportRows(rows) {
 }
 
 onMounted(() => {
+  // E4：支持从「设备分组」页跳转过来时带分组筛选（?group_id=0 表示未分组）
+  const q = route.query.group_id
+  if (q !== undefined && q !== null && q !== '') {
+    groupFilter.value = Number(q)
+  }
   loadDevices()
   loadProducts()
+  loadGroups()
   loadStats()
 })
 
@@ -331,6 +439,18 @@ onBeforeUnmount(() => clearTimeout(searchTimer))
 </script>
 
 <style scoped>
+/* E4：批量移入分组对话框 */
+.move-select {
+  width: 100%;
+}
+
+.move-tip {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #9ca3af;
+  line-height: 1.6;
+}
+
 .console {
   height: 100%;
   display: flex;

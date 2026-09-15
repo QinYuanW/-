@@ -95,6 +95,24 @@ export const listAlerts = (page = 1, size = 10) =>
 export const listDeviceEvents = (deviceKey, page = 1, size = 20, eventKey) =>
   http.get(`/devices/${deviceKey}/events`, { params: { page, size, event_key: eventKey } })
 
+// ===== E4 设备分组（契约 §10）=====
+
+/** 分组列表（含各分组设备数与未分组数） */
+export const listDeviceGroups = () => http.get('/device-groups')
+
+/** 新建分组 */
+export const createDeviceGroup = (data) => http.post('/device-groups', data)
+
+/** 编辑分组 */
+export const updateDeviceGroup = (id, data) => http.put(`/device-groups/${id}`, data)
+
+/** 删除分组（组内设备回到「未分组」，不级联删设备） */
+export const deleteDeviceGroup = (id) => http.delete(`/device-groups/${id}`)
+
+/** 批量分配设备到分组（id=0 表示移出分组） */
+export const assignDevicesToGroup = (id, deviceKeys) =>
+  http.put(`/device-groups/${id}/devices`, { device_keys: deviceKeys })
+
 export const dispatchCommand = (deviceKey, commandType, payload) =>
   http.post(`/devices/${deviceKey}/commands`, { command_type: commandType, payload })
 
