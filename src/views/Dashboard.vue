@@ -78,7 +78,8 @@ import {
   CircleCheckFilled,
   VideoPause,
   Calendar,
-  Clock
+  Clock,
+  Warning
 } from '@element-plus/icons-vue'
 import { getStatsOverview, getMessageTrend, listAlerts } from '../api'
 
@@ -117,9 +118,10 @@ const statCards = computed(() => [
     value: overview.product.total,
     icon: Box,
     gradient: 'linear-gradient(135deg, #60a5fa, #2563eb)',
+    // 产品只有「配置态」维度 —— 它没有"在线"概念，正常/禁用就是它的真实状态
     foot: [
-      { icon: CircleCheckFilled, color: '#16a34a', label: '启用', value: overview.product.enabled },
-      { icon: VideoPause, color: '#f59e0b', label: '停用', value: overview.product.disabled }
+      { icon: CircleCheckFilled, color: '#16a34a', label: '正常', value: overview.product.enabled },
+      { icon: VideoPause, color: '#f59e0b', label: '禁用', value: overview.product.disabled }
     ]
   },
   {
@@ -128,9 +130,15 @@ const statCards = computed(() => [
     value: overview.device.online,
     icon: Monitor,
     gradient: 'linear-gradient(135deg, #818cf8, #6366f1)',
+    // 设备卡片以「运行态」为主：在线/离线是打开仪表盘第一眼想知道、且时刻在变的指标。
+    // 配置态（已停用）只在**确实存在时**追加为异常提示，不占常规位置 ——
+    // 这样既对齐 JetLinks 的信息优先级，又不会让"我停过哪台设备"静默消失。
     foot: [
-      { icon: CircleCheckFilled, color: '#16a34a', label: '启用', value: overview.device.enabled },
-      { icon: VideoPause, color: '#f59e0b', label: '停用', value: overview.device.disabled }
+      { icon: CircleCheckFilled, color: '#16a34a', label: '在线', value: overview.device.online },
+      { icon: VideoPause, color: '#f59e0b', label: '离线', value: overview.device.offline },
+      ...(overview.device.disabled > 0
+        ? [{ icon: Warning, color: '#dc2626', label: '已停用', value: overview.device.disabled }]
+        : [])
     ]
   },
   {
