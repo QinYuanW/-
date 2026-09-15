@@ -253,6 +253,8 @@ defineExpose({ clearSelection })
   padding: 1px 8px;
   border-radius: 999px;
   flex-shrink: 0;
+  /* 标签内文字不折行（窄屏时避免显示成「已停 / 用」） */
+  white-space: nowrap;
 }
 
 .pill .dot {

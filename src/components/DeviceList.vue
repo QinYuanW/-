@@ -23,15 +23,18 @@
         <el-table-column label="所属产品" min-width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ productName(row.product_key) }}</template>
         </el-table-column>
-        <el-table-column label="状态" width="90">
+        <!-- F5：状态列要容纳两个独立维度的标签（在线/离线 + 已停用），宽度需够 -->
+        <el-table-column label="状态" width="150">
           <template #default="{ row }">
-            <span class="status-tag" :class="row.online_status === 1 ? 'on' : 'off'">
-              <i class="dot"></i>{{ row.online_status === 1 ? '在线' : '离线' }}
-            </span>
-            <!-- F5：停用状态与在线状态是两个维度，并排展示 —— 停用设备会显示「离线 + 已停用」 -->
-            <span v-if="row.status === 0" class="status-tag disabled">
-              <i class="dot"></i>已停用
-            </span>
+            <div class="status-cell">
+              <span class="status-tag" :class="row.online_status === 1 ? 'on' : 'off'">
+                <i class="dot"></i>{{ row.online_status === 1 ? '在线' : '离线' }}
+              </span>
+              <!-- 停用与在线是两个维度，并排展示 —— 停用设备会显示「离线 + 已停用」 -->
+              <span v-if="row.status === 0" class="status-tag disabled">
+                <i class="dot"></i>已停用
+              </span>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="最后在线时间" min-width="160">
@@ -164,6 +167,14 @@ defineExpose({ clearSelection })
   color: #4b5563;
 }
 
+/* F5：状态单元格要并排容纳「在线/离线 + 已停用」两个标签 */
+.status-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
 .status-tag {
   display: inline-flex;
   align-items: center;
@@ -171,6 +182,9 @@ defineExpose({ clearSelection })
   font-size: 12px;
   padding: 2px 10px;
   border-radius: 999px;
+  /* 标签内文字不折行 —— 否则列变窄时会显示成「已停 / 用」两行 */
+  white-space: nowrap;
+  flex: none;
 }
 
 .status-tag .dot {
