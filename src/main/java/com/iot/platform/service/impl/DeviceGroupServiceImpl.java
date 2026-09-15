@@ -2,6 +2,7 @@ package com.iot.platform.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.iot.platform.common.BizException;
 import com.iot.platform.common.ErrorCode;
 import com.iot.platform.dto.DeviceGroupRequest;
@@ -88,7 +89,13 @@ public class DeviceGroupServiceImpl implements DeviceGroupService {
         int freed = deviceMapper.update(null, new LambdaUpdateWrapper<Device>()
                 .eq(Device::getGroupId, id)
                 .set(Device::getGroupId, null));
-        groupMapper.deleteById(id);
+
+        // 墓碑写 id（而非 1）：配合 uk_group_name(name, deleted)，让名称可被**反复**复用。
+        // 必须手工 UPDATE —— MP 的 deleteById 会写死成 delval，第二次删同名组仍会撞唯一键（实测 1062）。
+        groupMapper.update(null, new UpdateWrapper<DeviceGroup>()
+                .eq("id", id)
+                .set("deleted", id));
+
         log.info("删除分组[{}]（id={}），{} 台设备回到未分组", exist.getName(), id, freed);
     }
 

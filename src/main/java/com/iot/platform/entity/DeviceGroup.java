@@ -26,8 +26,15 @@ public class DeviceGroup {
 
     private Integer sortOrder;
 
-    @TableLogic
-    private Integer deleted;
+    /**
+     * 墓碑标记：{@code 0} = 存活；{@code = id} 表示已删除。
+     *
+     * <p>用 id 而非 1，是为了配合唯一键 {@code uk_group_name (name, deleted)}，让「删除后名称可复用」
+     * 对**任意多次**删除都成立 —— 用 0/1 时第二次删除同名分组会撞唯一键（实测 1062）。
+     * 删除动作由 {@code DeviceGroupServiceImpl.delete()} 手工 UPDATE 完成，不走 MP 的 deleteById。
+     */
+    @TableLogic(value = "0", delval = "id")
+    private Long deleted;
 
     private LocalDateTime createdAt;
 
