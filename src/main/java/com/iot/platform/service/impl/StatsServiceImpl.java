@@ -41,6 +41,10 @@ public class StatsServiceImpl implements StatsService {
         long deviceTotal = statsMapper.countDevices();
         long deviceOnline = statsMapper.countDevicesOnline();
         long deviceEnabled = statsMapper.countDevicesEnabled();
+        // 可用性口径（2026-09-15）：产品停用会级联废掉整条产品线的设备，
+        // 但那些设备自身 status 仍是 1 —— 只报「设备自身停用数」会让它们整体隐身。
+        long deviceAvailable = statsMapper.countDevicesAvailable();
+        long deviceBlockedByProduct = statsMapper.countDevicesBlockedByProduct();
 
         // 带 ts 条件的两个计数可走分区裁剪；total 是全表扫描（唯一重查询）
         String monthStart = LocalDate.now().withDayOfMonth(1).format(DAY);
@@ -53,12 +57,19 @@ public class StatsServiceImpl implements StatsService {
                 "enabled", productEnabled,
                 "disabled", productTotal - productEnabled));
 
+        // device 段口径（2026-09-15 调整）：
+        //  · enabled / disabled  —— 设备**自身**配置态（保留原义，向后兼容）
+        //  · unavailable        —— 真实不可用 = 自身停用 + 被产品停用牵连
+        //  · blocked_by_product —— unavailable 中「设备自己没停、纯属被产品拖累」的那部分
+        //  三者满足：unavailable = disabled + blocked_by_product
         result.put("device", Map.of(
                 "total", deviceTotal,
                 "online", deviceOnline,
                 "offline", deviceTotal - deviceOnline,
                 "enabled", deviceEnabled,
-                "disabled", deviceTotal - deviceEnabled));
+                "disabled", deviceTotal - deviceEnabled,
+                "unavailable", deviceTotal - deviceAvailable,
+                "blocked_by_product", deviceBlockedByProduct));
 
         result.put("message", Map.of(
                 "total", statsMapper.countAllTelemetry(),

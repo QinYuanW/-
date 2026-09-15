@@ -62,7 +62,24 @@ public interface StatsMapper {
     @Select("SELECT COUNT(*) FROM device WHERE deleted = 0 AND online_status = 1")
     long countDevicesOnline();
 
-    /** 已启用设备数 */
+    /** 已启用设备数（仅看设备**自身** status，不含产品级联 —— 保留原义） */
     @Select("SELECT COUNT(*) FROM device WHERE deleted = 0 AND status = 1")
     long countDevicesEnabled();
+
+    // ===== 可用性口径（2026-09-15 新增）=====
+    //
+    // 「设备能不能用」= 设备自身启用 **AND** 所属产品启用，与 AuthServiceImpl 的判定同构
+    // （authenticate / isDeviceEnabled 走的就是 deviceEnabled && isProductEnabled）。
+    // 只看 device.status 会把「产品被停用 → 整条产品线设备全废」这半边完全漏掉：
+    // 那批设备自身 status 仍是 1，既不计入 disabled，也不代表能用。
+
+    /** 可用设备数（设备自身启用 **且** 所属产品启用） */
+    @Select("SELECT COUNT(*) FROM device d JOIN product p ON d.product_key = p.product_key " +
+            "WHERE d.deleted = 0 AND d.status = 1 AND p.deleted = 0 AND p.status = 1")
+    long countDevicesAvailable();
+
+    /** 被产品牵连的设备数（设备自身**是**启用的，但所属产品已停用） */
+    @Select("SELECT COUNT(*) FROM device d JOIN product p ON d.product_key = p.product_key " +
+            "WHERE d.deleted = 0 AND d.status = 1 AND p.deleted = 0 AND p.status = 0")
+    long countDevicesBlockedByProduct();
 }
