@@ -34,6 +34,7 @@
               <div class="status-line">
                 <span class="tag" :title="p.product_key">{{ p.product_key }}</span>
                 <span class="tag soft">{{ nodeTypeTextOf(p) }}</span>
+                <span v-if="p.status === 0" class="tag danger">已停用</span>
               </div>
             </div>
           </div>
@@ -61,6 +62,14 @@
             <button class="action" @click.stop="goDetail(p)">查看详情</button>
             <i class="divider"></i>
             <button class="action" @click.stop="goDevices(p)">设备列表</button>
+            <i class="divider"></i>
+            <button
+              class="action"
+              :class="p.status === 0 ? 'ok' : 'warn'"
+              @click.stop="toggleStatus(p)"
+            >
+              {{ p.status === 0 ? '启用' : '停用' }}
+            </button>
           </div>
         </div>
         <el-empty v-if="!loading && !filteredProducts.length" description="暂无产品" :image-size="80" class="cards-empty" />
@@ -88,9 +97,9 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search, Goods } from '@element-plus/icons-vue'
-import { listProducts, createProduct } from '../api'
+import { listProducts, createProduct, updateProductStatus } from '../api'
 import { formatTime } from '../utils/export'
 
 const router = useRouter()
@@ -136,6 +145,34 @@ function goDetail(p) {
 
 function goDevices(p) {
   router.push(`/products/${p.product_key}?tab=devices`)
+}
+
+/**
+ * F2 启停产品。
+ *
+ * 停用是**级联软禁用**：该产品下所有设备会被拒绝 MQTT 接入，但**不修改子设备自身的启停状态** ——
+ * 这样产品恢复后，每台设备的原状态能准确复现（哪些是停用的、哪些是本就好着的）。
+ */
+async function toggleStatus(p) {
+  const isDisable = p.status !== 0
+  try {
+    await ElMessageBox.confirm(
+      isDisable
+        ? `停用产品「${p.name}」后，该产品下所有设备将被拒绝 MQTT 接入与数据上报（历史数据与配置全部保留）。各设备自身的启停状态不受影响，恢复产品即一并恢复。`
+        : `启用产品「${p.name}」，其下设备恢复正常接入能力。`,
+      isDisable ? '停用产品' : '启用产品',
+      { type: 'warning', confirmButtonText: isDisable ? '停用' : '启用' }
+    )
+  } catch {
+    return
+  }
+  try {
+    await updateProductStatus(p.product_key, isDisable ? 0 : 1)
+    ElMessage.success(isDisable ? '已停用' : '已启用')
+    await load()
+  } catch (e) {
+    // 拦截器已提示
+  }
 }
 
 function openCreate() {

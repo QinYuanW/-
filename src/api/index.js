@@ -128,6 +128,24 @@ export const deleteDeviceGroup = (id) => http.delete(`/device-groups/${id}`)
 export const assignDevicesToGroup = (id, deviceKeys) =>
   http.put(`/device-groups/${id}/devices`, { device_keys: deviceKeys })
 
+// ===== F2 产品 / 设备启停 =====
+
+/**
+ * 启停产品。
+ * 停用后该产品下**所有**设备会被拒绝 MQTT 接入（级联判断在认证处实时合成），
+ * 且**不**修改子设备自身的启停状态 —— 产品恢复后各设备原状态准确复现。
+ */
+export const updateProductStatus = (productKey, status) =>
+  http.put(`/products/${productKey}/status`, { status })
+
+/**
+ * 批量启停设备。
+ * 停用后**立即**无法 MQTT 接入（认证校验 status 并清缓存），但数据全部保留，可一键恢复。
+ * 与「批量删除」的区别：删除会级联清空遥测/日志/指令/影子且不可逆。
+ */
+export const updateDeviceStatus = (deviceKeys, status) =>
+  http.put('/devices/status', { device_keys: deviceKeys, status })
+
 export const dispatchCommand = (deviceKey, commandType, payload) =>
   http.post(`/devices/${deviceKey}/commands`, { command_type: commandType, payload })
 

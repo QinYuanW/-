@@ -107,6 +107,8 @@
           <el-dropdown-menu>
             <el-dropdown-item command="move-group" :disabled="!selectedKeys.length">移入分组…</el-dropdown-item>
             <el-dropdown-item command="ungroup" :disabled="!selectedKeys.length">移出分组</el-dropdown-item>
+            <el-dropdown-item command="disable" divided :disabled="!selectedKeys.length">停用设备</el-dropdown-item>
+            <el-dropdown-item command="enable" :disabled="!selectedKeys.length">启用设备</el-dropdown-item>
             <el-dropdown-item command="delete" divided :disabled="!selectedKeys.length">批量删除</el-dropdown-item>
             <el-dropdown-item command="export" :disabled="!selectedKeys.length">导出选中</el-dropdown-item>
           </el-dropdown-menu>
@@ -177,7 +179,8 @@ import {
   listProducts,
   deleteDevices,
   listDeviceGroups,
-  assignDevicesToGroup
+  assignDevicesToGroup,
+  updateDeviceStatus
 } from '../api'
 import { downloadCsv, formatTime } from '../utils/export'
 import DeviceCards from '../components/DeviceCards.vue'
@@ -327,6 +330,41 @@ async function handleBatchAction(command) {
     moveDialogVisible.value = true
   } else if (command === 'ungroup') {
     await doAssign(0, '已移出分组')
+  } else if (command === 'disable') {
+    await doToggleStatus(0)
+  } else if (command === 'enable') {
+    await doToggleStatus(1)
+  }
+}
+
+/**
+ * F2 批量启停设备。
+ *
+ * 停用是「软禁用」：设备立即无法 MQTT 接入，但**遥测/日志/影子/指令全部保留**，可一键恢复 ——
+ * 与批量删除（级联清空、不可逆）是完全不同的语义，因此单独确认、文案也刻意强调"保留"。
+ */
+async function doToggleStatus(status) {
+  if (!selectedKeys.value.length) return
+  const isDisable = status === 0
+  try {
+    await ElMessageBox.confirm(
+      isDisable
+        ? `将停用 ${selectedKeys.value.length} 台设备：立即拒绝其 MQTT 接入与数据上报，但历史数据、影子与配置全部保留，可随时重新启用。`
+        : `将启用 ${selectedKeys.value.length} 台设备，恢复其接入与上报能力。`,
+      isDisable ? '停用设备' : '启用设备',
+      { type: 'warning', confirmButtonText: isDisable ? '停用' : '启用' }
+    )
+  } catch {
+    return
+  }
+  try {
+    const res = await updateDeviceStatus(selectedKeys.value, status)
+    ElMessage.success(`${isDisable ? '已停用' : '已启用'} ${res.data.affected} 台设备`)
+    listRef.value?.clearSelection?.()
+    selectedKeys.value = []
+    await loadDevices()
+  } catch (e) {
+    // 拦截器已提示
   }
 }
 
