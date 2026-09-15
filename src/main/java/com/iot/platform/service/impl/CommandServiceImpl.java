@@ -13,6 +13,7 @@ import com.iot.platform.entity.Command;
 import com.iot.platform.entity.Device;
 import com.iot.platform.mapper.CommandMapper;
 import com.iot.platform.mapper.DeviceMapper;
+import com.iot.platform.service.AuthService;
 import com.iot.platform.service.CommandService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -38,6 +39,8 @@ public class CommandServiceImpl implements CommandService {
     private final DeviceMapper deviceMapper;
     private final EmqxClient emqxClient;
     private final ObjectMapper objectMapper;
+    /** F2 停用拦截（复用认证缓存中的产品启用状态） */
+    private final AuthService authService;
 
     /** 状态常量：0 待下发 / 1 已下发 / 2 已执行 / 3 失败 / 4 超时 */
     private static final int ST_PENDING = 0;
@@ -56,6 +59,15 @@ public class CommandServiceImpl implements CommandService {
                 new LambdaQueryWrapper<Device>().eq(Device::getDeviceKey, deviceKey));
         if (device == null) {
             throw new IllegalArgumentException("device not found");
+        }
+
+        // F2 停用拦截：被停用的设备不应接收任何指令。
+        // 注意这里**先于**「离线即失败」的判断 —— 停用是配置态问题（需人工在页面恢复），
+        // 与「设备暂时不在线」不是一类事，错误码必须区分开（4006 vs 4005）。
+        if (device.getStatus() == null || device.getStatus() != 1
+                || !authService.isProductEnabled(device.getProductKey())) {
+            throw new BizException(ErrorCode.DEVICE_DISABLED,
+                    "设备已停用，指令未下发（可在「设备」页重新启用）");
         }
 
         // 0. E1 语义分家（2026-09-12 汤园决策）：命令 ≠ 期望状态

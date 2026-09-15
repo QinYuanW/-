@@ -12,6 +12,7 @@ import com.iot.platform.entity.DeviceTelemetry;
 import com.iot.platform.mapper.DeviceLogMapper;
 import com.iot.platform.mapper.DeviceMapper;
 import com.iot.platform.mapper.DeviceTelemetryMapper;
+import com.iot.platform.service.AuthService;
 import com.iot.platform.service.ShadowService;
 import com.iot.platform.service.ShadowSyncService;
 import com.iot.platform.service.TelemetryService;
@@ -44,6 +45,8 @@ public class TelemetryServiceImpl implements TelemetryService {
     private final ShadowService shadowService;
     /** E1 设备影子：上线时补发离线指令 + 对齐期望值 */
     private final ShadowSyncService shadowSyncService;
+    /** F2 停用拦截（复用认证缓存，命中时零查库） */
+    private final AuthService authService;
 
     /** 设备在线状态聚合刷新窗口：窗口内每设备只写一次 device 表，缓和高并发 hot-row 锁竞争（BUG-17 §3.3） */
     private static final Duration ONLINE_FLUSH_WINDOW = Duration.ofSeconds(5);
@@ -74,6 +77,13 @@ public class TelemetryServiceImpl implements TelemetryService {
             if (deviceId == null) {
                 // 永久失败：设备从未注册，重试多少次都是同一结果 → 不值一次重试，直接进死信
                 throwFatal("unknown device_key: " + request.getDeviceKey());
+            }
+
+            // 1.5 F2 停用拦截：设备或所属产品被停用 → 拒收。
+            // 认证回调只能拦住**新连接**，停用前已建立的长连接得靠这里兜住；
+            // 属永久失败（不恢复启用就永远不会成功），直接进死信而不是反复重试。
+            if (!authService.isDeviceEnabled(request.getDeviceKey())) {
+                throwFatal("device disabled: " + request.getDeviceKey());
             }
 
             // 2. 脏报文（缺属性/空属性）同样不会自愈，属永久失败

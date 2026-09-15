@@ -21,6 +21,7 @@ import com.iot.platform.mapper.DeviceLogMapper;
 import com.iot.platform.mapper.DeviceMapper;
 import com.iot.platform.mapper.DeviceTelemetryMapper;
 import com.iot.platform.mapper.ProductMapper;
+import com.iot.platform.service.AuthService;
 import com.iot.platform.service.DeviceService;
 import com.iot.platform.service.ShadowService;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +29,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.time.Instant;
@@ -50,6 +52,8 @@ public class DeviceServiceImpl implements DeviceService {
     private final ShadowService shadowService;
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
+    /** 用于状态变更后清除认证缓存（F2 启停） */
+    private final AuthService authService;
 
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final DateTimeFormatter KEY_TS = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
@@ -90,6 +94,29 @@ public class DeviceServiceImpl implements DeviceService {
         // ← 每个 Device 实体 → 调 DeviceVO.from() → 变成 DeviceVO 实体
         voPage.setRecords(devicePage.getRecords().stream().map(DeviceVO::from).collect(Collectors.toList()));
         return voPage;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int updateStatus(List<String> deviceKeys, int status) {
+        if (deviceKeys == null || deviceKeys.isEmpty()) return 0;
+        if (status != 0 && status != 1) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "status 只能是 0（停用）或 1（启用）");
+        }
+
+        int n = deviceMapper.update(null, new LambdaUpdateWrapper<Device>()
+                .in(Device::getDeviceKey, deviceKeys)
+                .set(Device::getStatus, status));
+
+        // 清认证缓存：让「停用」立即生效 —— 否则最长要等 5min TTL，
+        // 期间被停设备若重连仍可能被放行（认证走的是缓存里的旧状态）
+        for (String k : deviceKeys) {
+            authService.evictAuthCache(k);
+        }
+
+        log.info("设备状态批量更新为 {}{}，影响 {} 台", status,
+                status == 1 ? "（启用）" : "（停用：将拒绝 MQTT 接入）", n);
+        return n;
     }
 
     @Override

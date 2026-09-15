@@ -1,5 +1,7 @@
 package com.iot.platform.controller;
 
+import com.iot.platform.common.BizException;
+import com.iot.platform.common.ErrorCode;
 import com.iot.platform.common.Result;
 import com.iot.platform.dto.ProductCreateRequest;
 import com.iot.platform.dto.ProductVO;
@@ -41,6 +43,24 @@ public class ProductController {
     @GetMapping("/products/{productKey}/tsl")
     public Result<Map<String, Object>> tsl(@PathVariable String productKey) {
         return Result.ok(productService.getTsl(productKey));
+    }
+
+    /**
+     * F2 启停产品：body {@code {"status": 0|1}}。
+     *
+     * <p>停用后该产品下**所有设备**会被拒绝 MQTT 接入（认证处按
+     * {@code device.status && product.status} 实时合成，不批量改设备数据），
+     * 数据与配置全部保留，恢复产品即恢复正常。
+     */
+    @PutMapping("/products/{productKey}/status")
+    public Result<Void> updateStatus(@PathVariable String productKey,
+                                     @RequestBody Map<String, Integer> body) {
+        Integer status = body.get("status");
+        if (status == null) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "缺少 status（0 停用 / 1 启用）");
+        }
+        productService.updateStatus(productKey, status);
+        return Result.ok();
     }
 
     /** 更新某产品的物模型（校验通过后落库，并失效该产品下设备的影子 TSL 缓存） */

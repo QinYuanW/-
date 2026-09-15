@@ -31,4 +31,17 @@ public interface ProductService {
      * （E1 影子依赖这份缓存，TTL 1h，不清会让新属性被拒/漏记）。
      */
     Map<String, Object> updateTsl(String productKey, Map<String, Object> tsl);
+
+    /**
+     * F2 启停产品。
+     *
+     * @param status 1 = 启用，0 = 停用
+     *
+     * <p>停用后该产品下**所有**设备的 MQTT 接入会被拒绝 —— 级联判断在认证处实时合成
+     * （{@code device.status && product.status}），**不**批量改子设备的 status，
+     * 这样产品恢复时每台设备的原状态能准确复现。
+     *
+     * <p>变更后立即失效产品状态缓存（认证回调 TTL 5min），让停用不用等缓存过期。
+     */
+    void updateStatus(String productKey, int status);
 }

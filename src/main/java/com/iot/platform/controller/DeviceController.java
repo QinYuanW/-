@@ -1,6 +1,7 @@
 package com.iot.platform.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.iot.platform.common.BizException;
 import com.iot.platform.common.ErrorCode;
 import com.iot.platform.common.Result;
 import com.iot.platform.dto.DeviceRegisterRequest;
@@ -38,6 +39,25 @@ public class DeviceController {
                                             @RequestParam(name = "group_id", required = false) Long groupId) {
         Page<DeviceVO> result = deviceService.listDevices(page, size, keyword, productKey, onlineStatus, groupId);
         return Result.ok(Map.of("total", result.getTotal(), "items", result.getRecords()));
+    }
+
+    /**
+     * F2 批量启停设备：body {@code {"device_keys": [...], "status": 0|1}}。
+     *
+     * <p>停用后设备**立即**无法 MQTT 接入（认证回调校验 status，并同步清认证缓存）；
+     * **与删除的区别**是保留全部数据（遥测/日志/影子/指令），可一键恢复。
+     */
+    @PutMapping("/devices/status")
+    public Result<Map<String, Object>> updateStatus(@RequestBody Map<String, Object> body) {
+        Object status = body.get("status");
+        if (status == null) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "缺少 status（0 停用 / 1 启用）");
+        }
+        @SuppressWarnings("unchecked")
+        List<String> keys = (List<String>) body.get("device_keys");
+
+        int affected = deviceService.updateStatus(keys, Integer.parseInt(String.valueOf(status)));
+        return Result.ok(Map.of("affected", affected));
     }
 
     /** 3.3 批量删除设备：body {"device_keys": ["dev_xxx", ...]} */

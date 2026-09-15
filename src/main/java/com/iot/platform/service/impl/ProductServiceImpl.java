@@ -11,6 +11,8 @@ import com.iot.platform.entity.Device;
 import com.iot.platform.entity.Product;
 import com.iot.platform.mapper.DeviceMapper;
 import com.iot.platform.mapper.ProductMapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.iot.platform.service.AuthService;
 import com.iot.platform.service.ProductService;
 import com.iot.platform.service.ShadowService;
 import lombok.RequiredArgsConstructor;
@@ -42,6 +44,8 @@ public class ProductServiceImpl implements ProductService {
 
     private final ProductMapper productMapper;
     private final DeviceMapper deviceMapper;
+    /** 用于状态变更后立即失效产品启用缓存（认证回调侧） */
+    private final AuthService authService;
     private final ShadowService shadowService;
     private final ObjectMapper objectMapper;
 
@@ -233,6 +237,27 @@ public class ProductServiceImpl implements ProductService {
         } catch (Exception e) {
             throw new BizException(ErrorCode.PARAM_ERROR, "tsl 序列化失败");
         }
+    }
+
+    @Override
+    public void updateStatus(String productKey, int status) {
+        if (status != 0 && status != 1) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "status 只能是 0（停用）或 1（启用）");
+        }
+        Product exist = productMapper.selectOne(
+                new LambdaQueryWrapper<Product>().eq(Product::getProductKey, productKey));
+        if (exist == null) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "产品不存在: " + productKey);
+        }
+
+        productMapper.update(null, new LambdaUpdateWrapper<Product>()
+                .eq(Product::getProductKey, productKey)
+                .set(Product::getStatus, status));
+
+        // 立即失效产品状态缓存（认证回调侧 TTL 5min），让停用/启用不必等缓存自然过期
+        authService.evictProductCache(productKey);
+        log.info("产品[{}] 状态 → {}{}", productKey, status,
+                status == 1 ? "（启用）" : "（停用：该产品下所有设备将无法接入）");
     }
 
     private int countOf(Object list) {
