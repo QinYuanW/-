@@ -93,7 +93,26 @@ public class DeviceServiceImpl implements DeviceService {
         Page<DeviceVO> voPage = new Page<>(page, size, devicePage.getTotal());
         // ← 每个 Device 实体 → 调 DeviceVO.from() → 变成 DeviceVO 实体
         voPage.setRecords(devicePage.getRecords().stream().map(DeviceVO::from).collect(Collectors.toList()));
+        fillProductEnabled(voPage.getRecords());
         return voPage;
+    }
+
+    /**
+     * 批量填充「所属产品是否启用」。
+     *
+     * <p>产品状态走 Redis 缓存（{@code prod:enabled:}），且一页设备通常只归属少数几个产品，
+     * 故先按 product_key 本地去重，每个产品最多查一次 —— 不构成 N+1。
+     *
+     * <p>为什么不直接把产品的启用状态并进 device.status：那样会丢掉"是谁停的"这条信息，
+     * 前端就只能显示"已停用"，运维得自己猜是设备被停还是产品被停。
+     */
+    private void fillProductEnabled(List<DeviceVO> vos) {
+        if (vos == null || vos.isEmpty()) return;
+        Map<String, Boolean> local = new HashMap<>();
+        for (DeviceVO vo : vos) {
+            vo.setProductEnabled(local.computeIfAbsent(vo.getProductKey(),
+                    authService::isProductEnabled));
+        }
     }
 
     @Override
