@@ -123,7 +123,24 @@ defineExpose({ clearSelection })
   display: flex;
   flex-direction: column;
   gap: 14px;
+  /* 撑满父容器剩余高度 —— 否则表格会一直向下生长，被 .console 的 overflow:hidden 裁掉 */
+  flex: 1;
   min-height: 0;
+}
+
+/*
+ * 表格滚动容器。
+ *
+ * ⚠️ 这三行缺一不可：外层 .console 是 overflow:hidden 的定高 flex 容器，
+ * 中间任何一层少了 min-height:0，flex 子项就不会收缩，内容会被直接裁掉
+ * —— 表现就是「只能看到固定一屏、滚不动」。
+ *
+ * 分页控件刻意放在本容器**之外**：表头与滚动区滚动时，分页条始终可见。
+ */
+.dev-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .dev-table {
