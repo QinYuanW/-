@@ -140,7 +140,9 @@ CREATE TABLE IF NOT EXISTS device_group (
   name VARCHAR(64) NOT NULL,
   description VARCHAR(255) NULL,
   sort_order INT NOT NULL DEFAULT 0,
-  deleted TINYINT NOT NULL DEFAULT 0,
+  -- ⚠️ 墓碑标记「存 id 而非 1」：配合唯一键 (name, deleted)，保证「删除后名称可复用」这对**任意多次**
+  -- 删除都成立。若用 0/1，第二次删除同名分组就会撞上 (name, 1) 的唯一键（实测 1062）。
+  deleted BIGINT UNSIGNED NOT NULL DEFAULT 0,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
