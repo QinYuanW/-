@@ -766,6 +766,77 @@
 
 ---
 
+## 10. 设备分组（E4）
+
+> ✅ **已实现（2026-09-15）**。分组的定位是「**按运维维度批量组织设备**」，与「产品」（设备的能力定义）正交。
+
+**设计决策**
+
+| 决策 | 选择 | 理由 |
+|---|---|---|
+| 分组结构 | **平铺一级**（不做树形） | 设备分组的实际用法是"按位置/用途分几组"；层级带来的递归查询与前端树组件成本换不来对应价值。若日后确需层级，加 `parent_id` 可平滑扩展 |
+| 设备归属 | `device.group_id`（一对多，**不用中间表**） | "一个设备同时属于多个分组"在运维语义上无意义；多维度标记交给 `tags` |
+| 标签 | `device.tags`（逗号分隔字符串） | 字段早已预留，不单独建标签表 |
+| 删除语义 | **删分组不删设备** | 组内设备 `group_id` 置空回到「未分组」，避免"手滑删分组把设备一起干掉" |
+
+**接口一览**
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| GET | `/api/v1/device-groups` | 分组列表（含各分组设备数与未分组数） |
+| POST | `/api/v1/device-groups` | 新建 |
+| PUT | `/api/v1/device-groups/{id}` | 编辑 |
+| DELETE | `/api/v1/device-groups/{id}` | 删除（设备回到未分组） |
+| PUT | `/api/v1/device-groups/{id}/devices` | **批量分配设备**（`id=0` = 移出分组） |
+
+**GET `/api/v1/device-groups` 响应：**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "ungrouped": 1016,
+    "items": [
+      { "id": 1, "name": "一楼温控", "description": "展厅", "sortOrder": 0, "deviceCount": 3 }
+    ]
+  }
+}
+```
+
+> 设备数由 `LEFT JOIN device` 一次查出（`d.deleted = 0` 过滤软删除设备），避免 N+1。
+
+**POST / PUT 请求体：**
+
+```json
+{ "name": "一楼温控", "description": "展厅", "sortOrder": 0 }
+```
+
+> `name` 必填且**唯一**（软删除的组不占用名称）；重复返回 `4001`。
+
+**PUT `/api/v1/device-groups/{id}/devices` 请求体：**
+
+```json
+{ "device_keys": ["dev_a", "dev_b"] }
+```
+
+| 路径参数 | 说明 |
+|---|---|
+| `id > 0` | 移入该分组（分组不存在 → `4001`） |
+| `id = 0` | **移出分组**（回到「未分组」） |
+
+> 响应 `{ "affected": 2 }`。实现为**一条 `UPDATE ... WHERE device_key IN (...)`**，不做逐台更新。
+
+**设备列表新增筛选参数**
+
+| 参数 | 说明 |
+|---|---|
+| `group_id`（`GET /api/v1/devices`） | `>0` 按分组过滤；**`=0` 表示「未分组」**（`group_id IS NULL OR = 0`）；缺省不过滤 |
+
+> 「未分组」用 `0` 而非 `null` 表达，是因为 `null`（不传）已有"不过滤"的含义，两者必须区分开。
+
+---
+
 ## 附 · 已实现接口索引（v1.3 之后落地，本节为补录）
 
 > 下列接口**已在代码中实现并运行**，v1.3 文档未收录。此处补录签名（报文细节以代码为准），恢复「本文档 = 接口单一事实源」。
@@ -785,6 +856,10 @@
 | DELETE | `/api/v1/devices/{device_key}/shadow` | 清除影子 | E1 | — |
 | GET | `/api/v1/devices/{device_key}/commands/pending` | 待下发指令队列 | E1 | `items[]` + `total` |
 | POST | `/api/v1/commands/ack` | 设备指令 ACK 回调 | M4 | EMQX 调用；**JWT 放行**；状态机 1→2/3 |
+| GET | `/api/v1/device-groups` | 分组列表 | E4 | 响应 `{ungrouped, items[]}`；`items[]` 含 `deviceCount` |
+| POST / PUT / DELETE | `/api/v1/device-groups[/{id}]` | 分组增删改 | E4 | body `{name, description?, sortOrder?}`；**删组不删设备**（组内设备回到未分组） |
+| PUT | `/api/v1/device-groups/{id}/devices` | 批量分配设备到分组 | E4 | body `{"device_keys":[...]}`；**`id=0` 表示移出分组**；响应 `{affected:n}` |
+| GET | `/api/v1/devices` | 设备列表（**新增分组筛选**） | E4 | 新增 `group_id`：`>0` 按组过滤，**`=0` 表示未分组**，缺省不过滤 |
 > ⚠️ **已移除接口（2026-09-13 汤园决策）**：`POST /api/v1/demo/reset`（G5 演示数据一键重置）及前端 `demoReset` 封装**已整体删除**——清库级接口不应长期留在代码库中（曾在设备页工具栏暴露，误点即全库归零）。
 > 若将来演示确需复位能力，建议**在演示脚本里直接用 SQL**（`db/seed.sql` 即基线定义），不再恢复该 HTTP 端点。
 
