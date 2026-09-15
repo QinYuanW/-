@@ -19,7 +19,8 @@ public interface DeviceService {
      * @param onlineStatus 在线状态筛选：null/0 不过滤，1 在线，2 离线（3.3 列表增强）
      * @return 设备列表
      */
-    Page<DeviceVO> listDevices(int page, int size, String keyword, String productKey, Integer onlineStatus);
+    Page<DeviceVO> listDevices(int page, int size, String keyword, String productKey,
+                               Integer onlineStatus, Long groupId);
 
     /**
      * 批量删除设备（级联清理遥测/日志/指令/影子，3.3 列表增强）

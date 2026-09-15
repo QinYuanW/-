@@ -34,8 +34,9 @@ public class DeviceController {
                                             @RequestParam(defaultValue = "20") int size,
                                             @RequestParam(required = false) String keyword,
                                             @RequestParam(name = "product_key", required = false) String productKey,
-                                            @RequestParam(name = "online_status", required = false) Integer onlineStatus) {
-        Page<DeviceVO> result = deviceService.listDevices(page, size, keyword, productKey, onlineStatus);
+                                            @RequestParam(name = "online_status", required = false) Integer onlineStatus,
+                                            @RequestParam(name = "group_id", required = false) Long groupId) {
+        Page<DeviceVO> result = deviceService.listDevices(page, size, keyword, productKey, onlineStatus, groupId);
         return Result.ok(Map.of("total", result.getTotal(), "items", result.getRecords()));
     }
 
