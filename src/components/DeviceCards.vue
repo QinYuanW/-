@@ -23,6 +23,10 @@
                 <span class="pill" :class="d.online_status === 1 ? 'on' : 'off'">
                   <i class="dot"></i>{{ d.online_status === 1 ? '在线' : '离线' }}
                 </span>
+                <!-- F5：停用与在线是两个维度，并排展示 -->
+                <span v-if="d.status === 0" class="pill disabled">
+                  <i class="dot"></i>已停用
+                </span>
                 <span class="tag" :title="productName(d.product_key)">{{ productName(d.product_key) }}</span>
               </div>
             </div>
@@ -125,6 +129,16 @@ defineExpose({ clearSelection })
 </script>
 
 <style scoped>
+/* F5 停用标签：用琥珀色与「在线/离线」区分 —— 两者是两个维度 */
+.pill.disabled {
+  color: #ba7517;
+  background: #faeeda;
+}
+
+.pill.disabled .dot {
+  background: #ef9f27;
+}
+
 .dev-cards {
   background: #fff;
   border: 1px solid #e5eaf2;

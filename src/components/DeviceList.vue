@@ -28,6 +28,10 @@
             <span class="status-tag" :class="row.online_status === 1 ? 'on' : 'off'">
               <i class="dot"></i>{{ row.online_status === 1 ? '在线' : '离线' }}
             </span>
+            <!-- F5：停用状态与在线状态是两个维度，并排展示 —— 停用设备会显示「离线 + 已停用」 -->
+            <span v-if="row.status === 0" class="status-tag disabled">
+              <i class="dot"></i>已停用
+            </span>
           </template>
         </el-table-column>
         <el-table-column label="最后在线时间" min-width="160">
@@ -101,6 +105,16 @@ defineExpose({ clearSelection })
 </script>
 
 <style scoped>
+/* F5 停用标签：用琥珀色与「在线/离线」的青绿/灰区分开 —— 两者是两个维度 */
+.status-tag.disabled {
+  color: #ba7517;
+  background: #faeeda;
+}
+
+.status-tag.disabled .dot {
+  background: #ef9f27;
+}
+
 .dev-list {
   background: #fff;
   border: 1px solid #e5eaf2;
