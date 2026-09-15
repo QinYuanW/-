@@ -25,6 +25,9 @@ public class DeviceVO {
     @JsonProperty("last_online_at")
     private String lastOnlineAt;
 
+    /** F2 启用状态：1 启用 / 0 停用（停用后立即拒绝 MQTT 接入，但数据全保留） */
+    private Integer status;
+
     // ── ② DeviceVO 从 Device 实体转换而来──── 专门负责裁剪的静态工厂方法
     public static DeviceVO from(Device d) {
         DeviceVO vo = new DeviceVO();
@@ -33,6 +36,7 @@ public class DeviceVO {
         vo.setDeviceName(d.getDeviceName());
         vo.setProductKey(d.getProductKey());
         vo.setOnlineStatus(d.getOnlineStatus());
+        vo.setStatus(d.getStatus());
         vo.setLastOnlineAt(d.getLastOnlineAt() != null ? d.getLastOnlineAt().toString() : null);
         return vo;
     }

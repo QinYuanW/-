@@ -29,6 +29,9 @@ public class ProductVO {
     /** 物模型（已解析为对象；解析失败返回空对象，不阻断列表展示） */
     private Map<String, Object> tsl;
 
+    /** F2 启用状态：1 启用 / 0 停用（停用后其下所有设备拒绝接入） */
+    private Integer status;
+
     @JsonProperty("created_at")
     private String createdAt;
 
@@ -40,6 +43,7 @@ public class ProductVO {
         vo.setNodeType(p.getNodeType());
         vo.setProtocol(p.getProtocol());
         vo.setDataFormat(p.getDataFormat());
+        vo.setStatus(p.getStatus());
         vo.setCreatedAt(p.getCreatedAt() != null ? p.getCreatedAt().toString() : null);
         vo.setTsl(parseTsl(p.getTsl(), mapper));
         return vo;
