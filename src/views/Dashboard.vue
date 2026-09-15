@@ -16,11 +16,19 @@
           </div>
         </div>
         <div class="stat-foot">
-          <div v-for="f in c.foot" :key="f.label" class="foot-item">
-            <el-icon :size="13" :color="f.color"><component :is="f.icon" /></el-icon>
-            <span class="foot-label">{{ f.label }}</span>
-            <b class="foot-value">{{ f.value }}</b>
-          </div>
+          <el-tooltip
+            v-for="f in c.foot"
+            :key="f.label"
+            :content="f.tip"
+            :disabled="!f.tip"
+            placement="top"
+          >
+            <div class="foot-item">
+              <el-icon :size="13" :color="f.color"><component :is="f.icon" /></el-icon>
+              <span class="foot-label">{{ f.label }}</span>
+              <b class="foot-value">{{ f.value }}</b>
+            </div>
+          </el-tooltip>
         </div>
       </div>
     </div>
@@ -88,7 +96,7 @@ import { getStatsOverview, getMessageTrend, listAlerts } from '../api'
 
 const overview = reactive({
   product: { total: 0, enabled: 0, disabled: 0 },
-  device: { total: 0, online: 0, offline: 0, enabled: 0, disabled: 0 },
+  device: { total: 0, online: 0, offline: 0, enabled: 0, disabled: 0, unavailable: 0, blocked_by_product: 0 },
   message: { total: 0, month: 0, today: 0 },
   alarm: { total: 0, month: 0, today: 0 }
 })
@@ -133,13 +141,25 @@ const statCards = computed(() => [
     icon: Monitor,
     gradient: 'linear-gradient(135deg, #818cf8, #6366f1)',
     // 设备卡片以「运行态」为主：在线/离线是打开仪表盘第一眼想知道、且时刻在变的指标。
-    // 配置态（已停用）只在**确实存在时**追加为异常提示，不占常规位置 ——
+    // 配置态异常只在**确实存在时**追加，不占常规位置 ——
     // 这样既对齐 JetLinks 的信息优先级，又不会让"我停过哪台设备"静默消失。
+    //
+    // 口径修正（2026-09-15）：原来这里用的是 device.disabled（只看设备**自身** status），
+    // 于是「产品被停用 → 整条产品线设备全废」这半边完全隐身：那批设备自身 status 仍是 1，
+    // 既不计入 disabled、也不在离线里，仪表盘看不到任何异常（已实测复现）。
+    // 现改用 device.unavailable = 自身停用 + 被产品牵连，并悬停给出拆解
+    // —— 保留「是谁拖的」这一处置线索（前者去设备页启用，后者去产品页启用）。
     foot: [
       { icon: CircleCheckFilled, color: '#16a34a', label: '在线', value: overview.device.online },
       { icon: VideoPause, color: '#f59e0b', label: '离线', value: overview.device.offline },
-      ...(overview.device.disabled > 0
-        ? [{ icon: Warning, color: '#dc2626', label: '已停用', value: overview.device.disabled }]
+      ...(overview.device.unavailable > 0
+        ? [{
+            icon: Warning,
+            color: '#dc2626',
+            label: '不可用',
+            value: overview.device.unavailable,
+            tip: `设备自身停用 ${overview.device.disabled} 台 · 因产品停用牵连 ${overview.device.blocked_by_product} 台`
+          }]
         : [])
     ]
   },
