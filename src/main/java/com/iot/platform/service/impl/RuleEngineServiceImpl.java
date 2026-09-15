@@ -43,6 +43,11 @@ import java.util.Map;
 public class RuleEngineServiceImpl implements RuleEngineService {
 
     private static final String COOLDOWN_PREFIX = "rule:cd:";
+    private static final String RULE_CACHE_PREFIX = "rules:";
+    /** 规则缓存 TTL：规则变更后最多 60s 生效，对阈值告警场景完全可接受 */
+    private static final long RULE_CACHE_TTL_SEC = 60L;
+    /** 空列表标记：用于区分「该产品确实没规则」与「缓存不存在」 */
+    private static final String EMPTY_MARKER = "__EMPTY__";
 
     private final DeviceMapper deviceMapper;
     private final DeviceRuleMapper ruleMapper;
@@ -63,10 +68,7 @@ public class RuleEngineServiceImpl implements RuleEngineService {
             Device device = resolveDevice(request.getDeviceKey());
             if (device == null) return;
 
-            List<DeviceRule> rules = ruleMapper.selectList(new LambdaQueryWrapper<DeviceRule>()
-                    .eq(DeviceRule::getProductKey, device.getProductKey())
-                    .eq(DeviceRule::getEnabled, 1)
-                    .eq(DeviceRule::getDeleted, 0));
+            List<DeviceRule> rules = loadRulesCached(device.getProductKey());
             if (rules.isEmpty()) return;
 
             for (DeviceRule rule : rules) {
@@ -81,6 +83,47 @@ public class RuleEngineServiceImpl implements RuleEngineService {
             // 规则引擎整体失败绝不能影响遥测主链路
             log.warn("规则引擎异常（已忽略）: device_key={}, err={}", request.getDeviceKey(), e.getMessage());
         }
+    }
+
+    /**
+     * 取该产品下「启用且未删除」的规则（Redis 缓存 60s）。
+     *
+     * <h3>为什么必须缓存（C2 收尾实测驱动）</h3>
+     * 规则评估挂在<b>每条上报</b>上。实测单条处理 14.5ms 中，规则环节占 ~2~3ms，主因就是这里的一次
+     * SELECT；而压测场景下绝大多数设备所属产品<b>根本没配规则</b>，却仍要白查一次库。
+     *
+     * <h3>两个关键细节</h3>
+     * <ol>
+     *   <li><b>空列表也要缓存</b>（用 {@link #EMPTY_MARKER} 标记）—— 否则「没规则的产品」每次上报
+     *       照样查库，优化等于没做（这恰恰是压测中的大多数）；</li>
+     *   <li><b>缓存读写失败一律回退查库</b> —— 只损失性能，不影响规则生效。</li>
+     * </ol>
+     */
+    private List<DeviceRule> loadRulesCached(String productKey) {
+        String cacheKey = RULE_CACHE_PREFIX + productKey;
+        try {
+            String cached = redisTemplate.opsForValue().get(cacheKey);
+            if (cached != null) {
+                if (EMPTY_MARKER.equals(cached)) return List.of();
+                return objectMapper.readValue(cached, new TypeReference<List<DeviceRule>>() {});
+            }
+        } catch (Exception e) {
+            log.debug("规则缓存读取失败，回退查库: {}", e.getMessage());
+        }
+
+        List<DeviceRule> rules = ruleMapper.selectList(new LambdaQueryWrapper<DeviceRule>()
+                .eq(DeviceRule::getProductKey, productKey)
+                .eq(DeviceRule::getEnabled, 1)
+                .eq(DeviceRule::getDeleted, 0));
+
+        try {
+            redisTemplate.opsForValue().set(cacheKey,
+                    rules.isEmpty() ? EMPTY_MARKER : objectMapper.writeValueAsString(rules),
+                    Duration.ofSeconds(RULE_CACHE_TTL_SEC));
+        } catch (Exception e) {
+            log.debug("规则缓存写入失败: {}", e.getMessage());
+        }
+        return rules;
     }
 
     private void evaluateOne(DeviceRule rule, Device device, TelemetryRequest request) {
