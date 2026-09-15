@@ -118,10 +118,12 @@ const statCards = computed(() => [
     value: overview.product.total,
     icon: Box,
     gradient: 'linear-gradient(135deg, #60a5fa, #2563eb)',
-    // 产品只有「配置态」维度 —— 它没有"在线"概念，正常/禁用就是它的真实状态
+    // 产品只有「配置态」维度 —— 它没有"在线"概念，正常/已停用就是它的真实状态
+    // 术语与配色统一（2026-09-15）：产品卡片用「已停用」，仪表盘此前叫「禁用」+ 琥珀色 ——
+    // 同一个概念三个叫法、两种颜色，用户得自己翻译。现统一为「已停用」+ 红（#dc2626）。
     foot: [
       { icon: CircleCheckFilled, color: '#16a34a', label: '正常', value: overview.product.enabled },
-      { icon: VideoPause, color: '#f59e0b', label: '禁用', value: overview.product.disabled }
+      { icon: VideoPause, color: '#dc2626', label: '已停用', value: overview.product.disabled }
     ]
   },
   {

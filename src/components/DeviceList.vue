@@ -23,8 +23,8 @@
         <el-table-column label="所属产品" min-width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ productName(row.product_key) }}</template>
         </el-table-column>
-        <!-- F5：状态列要容纳两个独立维度的标签（在线/离线 + 已停用），宽度需够 -->
-        <el-table-column label="状态" width="150">
+        <!-- F5：状态列要并排容纳三个独立维度的标签（在线/离线 + 已停用 + 产品已停用），宽度需够 -->
+        <el-table-column label="状态" width="260">
           <template #default="{ row }">
             <div class="status-cell">
               <span class="status-tag" :class="row.online_status === 1 ? 'on' : 'off'">
@@ -33,6 +33,10 @@
               <!-- 停用与在线是两个维度，并排展示 —— 停用设备会显示「离线 + 已停用」 -->
               <span v-if="row.status === 0" class="status-tag disabled">
                 <i class="dot"></i>已停用
+              </span>
+              <!-- 级联维度：设备自身没被停，但所属产品被停用 —— 一样拒绝接入，恢复要去「产品」页 -->
+              <span v-if="row.product_enabled === false" class="status-tag prod-disabled">
+                <i class="dot"></i>产品已停用
               </span>
             </div>
           </template>
@@ -116,6 +120,22 @@ defineExpose({ clearSelection })
 
 .status-tag.disabled .dot {
   background: #ef9f27;
+}
+
+/*
+ * 级联停用标签：用红色区别于设备自身的「已停用」（琥珀）。
+ *
+ * 两者在链路上都会被拒绝接入，但**原因与恢复动作不同**：
+ * 「已停用」去设备页启用这台设备，「产品已停用」得去产品页恢复产品。
+ * 从前只透出 device.status，产品停用后设备一律显示"一切正常"，属于界面说谎。
+ */
+.status-tag.prod-disabled {
+  color: #dc2626;
+  background: #fef2f2;
+}
+
+.status-tag.prod-disabled .dot {
+  background: #dc2626;
 }
 
 .dev-list {

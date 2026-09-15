@@ -99,7 +99,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search, Goods } from '@element-plus/icons-vue'
-import { listProducts, createProduct, updateProductStatus } from '../api'
+import { listProducts, createProduct, updateProductStatus, listDevices } from '../api'
 import { formatTime } from '../utils/export'
 
 const router = useRouter()
@@ -155,10 +155,24 @@ function goDevices(p) {
  */
 async function toggleStatus(p) {
   const isDisable = p.status !== 0
+
+  // 影响面：停用是**级联**的，只说"其下所有设备"运维无法预估这一下捅了多大篓子。
+  // 取台数用 size=1（只为拿 total），失败时不阻断主流程，退回模糊表述。
+  let affected = null
+  if (isDisable) {
+    try {
+      const res = await listDevices(1, 1, '', p.product_key)
+      affected = res.data.total
+    } catch (e) {
+      // 拦截器已提示；台数拿不到就不显示
+    }
+  }
+  const scope = affected == null ? '该产品下所有设备' : `该产品下 ${affected} 台设备`
+
   try {
     await ElMessageBox.confirm(
       isDisable
-        ? `停用产品「${p.name}」后，该产品下所有设备将被拒绝 MQTT 接入与数据上报（历史数据与配置全部保留）。各设备自身的启停状态不受影响，恢复产品即一并恢复。`
+        ? `停用产品「${p.name}」后，${scope}将被拒绝 MQTT 接入与数据上报（历史数据与配置全部保留）。各设备自身的启停状态不受影响，恢复产品即一并恢复。`
         : `启用产品「${p.name}」，其下设备恢复正常接入能力。`,
       isDisable ? '停用产品' : '启用产品',
       { type: 'warning', confirmButtonText: isDisable ? '停用' : '启用' }
@@ -333,6 +347,18 @@ onMounted(load)
   color: #6b7280;
 }
 
+/*
+ * 「已停用」标签：红底红字。
+ * 此前模板写了 class="tag danger"，但 .danger 的样式**从未定义** ——
+ * 于是它退回成基础 .tag 的蓝底蓝字，和旁边的 product_key 标签长得一模一样，
+ * 「这个产品挂了」这条信息被彻底吞掉。2026-09-15 修复。
+ */
+.tag.danger {
+  background: #fef2f2;
+  color: #dc2626;
+  font-weight: 500;
+}
+
 .card-meta {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -383,6 +409,28 @@ onMounted(load)
 
 .action:hover {
   color: #2563eb;
+}
+
+/*
+ * 「启用 / 停用」两个动作的语义色：启用绿、停用红，与卡片上的「已停用」标签呼应。
+ * 模板里写了 :class="p.status === 0 ? 'ok' : 'warn'"，但 .ok / .warn 同样**没有样式** ——
+ * 两个动作此前都是灰字，用户得读完文字才知道哪个是"危险操作"。2026-09-15 补齐。
+ * 注意顺序：.action.ok:hover 特异性高于 .action:hover，能稳定压过默认蓝。
+ */
+.action.ok {
+  color: #16a34a;
+}
+
+.action.ok:hover {
+  color: #15803d;
+}
+
+.action.warn {
+  color: #dc2626;
+}
+
+.action.warn:hover {
+  color: #b91c1c;
 }
 
 .divider {

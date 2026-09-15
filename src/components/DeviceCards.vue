@@ -27,6 +27,10 @@
                 <span v-if="d.status === 0" class="pill disabled">
                   <i class="dot"></i>已停用
                 </span>
+                <!-- 级联维度：设备自身没被停，但所属产品被停用 —— 一样拒绝接入，恢复要去「产品」页 -->
+                <span v-if="d.product_enabled === false" class="pill prod-disabled">
+                  <i class="dot"></i>产品已停用
+                </span>
                 <span class="tag" :title="productName(d.product_key)">{{ productName(d.product_key) }}</span>
               </div>
             </div>
@@ -137,6 +141,16 @@ defineExpose({ clearSelection })
 
 .pill.disabled .dot {
   background: #ef9f27;
+}
+
+/* 级联停用：红色区别于设备自身的「已停用」—— 恢复动作在产品页，不在设备页 */
+.pill.prod-disabled {
+  color: #dc2626;
+  background: #fef2f2;
+}
+
+.pill.prod-disabled .dot {
+  background: #dc2626;
 }
 
 .dev-cards {
