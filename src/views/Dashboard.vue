@@ -383,23 +383,29 @@ onBeforeUnmount(() => {
 .stat-foot {
   display: flex;
   gap: 8px;
+  /* 放不下时**整项**换到下一行，而不是把项内文字拦腰折断 —— 见 .foot-item 的 nowrap */
+  flex-wrap: wrap;
   margin-top: 14px;
 }
 
 .foot-item {
-  flex: 1;
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
   gap: 5px;
   background: #f8fafc;
   border-radius: 6px;
-  padding: 6px 10px;
+  padding: 6px 8px;
   min-width: 0;
+  /* 项内文字不折行：设备卡片可能有三项（在线/离线/已停用），窄了就折成两行很难看 */
+  white-space: nowrap;
 }
 
 .foot-label {
   font-size: 12px;
   color: #9ca3af;
+  /* 双保险：标签永不折行（曾出现「离\n线」「已停\n用」） */
+  white-space: nowrap;
 }
 
 .foot-value {
