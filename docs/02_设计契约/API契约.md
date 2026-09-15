@@ -517,7 +517,8 @@
   "message": "ok",
   "data": {
     "product": { "total": 33, "enabled": 15, "disabled": 18 },
-    "device": { "total": 1014, "online": 1, "offline": 1013, "enabled": 12, "disabled": 11 },
+    "device": { "total": 1014, "online": 1, "offline": 1013, "enabled": 12, "disabled": 11,
+                "unavailable": 411, "blocked_by_product": 400 },
     "message": { "total": 12079200, "month": 592800, "today": 39900 },
     "alarm": { "total": 0, "month": 0, "today": 0 }
   }
@@ -530,7 +531,23 @@
 | product.enabled / disabled | int | 同上再加 `status=1` / `status=0` |
 | device.total | int | `device` 表 `deleted=0` 计数 |
 | device.online / offline | int | `device.online_status=1` / `=0`（`deleted=0`） |
-| device.enabled / disabled | int | `device.status=1` / `=0` |
+| device.enabled / disabled | int | `device.status=1` / `=0` —— **仅设备自身**配置态（保留原义，向后兼容） |
+| device.unavailable | int | **真实不可用** = 自身停用 + 被产品停用牵连 = `total -` 可用数（见下） |
+| device.blocked_by_product | int | 自身**启用**、但所属产品已停用的设备数（`device JOIN product`） |
+
+> ⚠️ **`unavailable` 与 `disabled` 的区别（2026-09-15 新增，勿混用）**
+>
+> 设备可用性是**两级配置态的 AND**：`可用 = device.status=1 AND product.status=1`，与认证/遥测的判定同构。
+> 只看 `device.disabled` 会漏掉「产品被停用 → 整条产品线设备全废」这半边：那批设备自身 `status` 仍是 1，
+> 既不计入 `disabled`、也不在 `offline` 里，**在仪表盘上完全不可见**（已实测复现：3 台设备被产品牵连集体不可工作，
+> 而 `device.disabled` 一个数都没变）。
+>
+> 三个字段满足恒等式：**`unavailable = disabled + blocked_by_product`**（且三者对 `deleted=0` 的设备构成完备互斥划分）。
+>
+> 控制台仪表盘设备卡片展示的是 **`unavailable`**（label「不可用」），悬停展开拆解为
+> 「设备自身停用 N 台 · 因产品停用牵连 M 台」—— 保留「是谁拖的」这一处置线索
+> （前者去设备页启用，后者去产品页启用）。
+
 | message.total | int | `device_telemetry` 全表计数 |
 | message.month | int | `ts >= 当月 1 号 00:00:00` 计数 |
 | message.today | int | `ts >= 今日 00:00:00` 计数 |
