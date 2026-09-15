@@ -343,3 +343,74 @@
   3. 若已误删：文件处于**未暂存删除**时用 `git restore --worktree <path>` 恢复（不要用 `git reset --hard`，会波及正确改动）。
 - **教训**：`git rm` 回显正常 **≠** 只删了那一个文件。**删除类操作的验收标准是「事后核对影响面」，不是「命令没报错」。**
 - **状态**：✅ 已恢复并核实
+
+### BUG-26：停用「产品」后其下设备仍可接入最长 300s——产品级停用漏清了设备认证缓存（级联只在指令面即时生效）
+
+- **现象**：停用产品后**重新发起 MQTT 认证，仍返回 204（通过）**，即该产品下设备在被停用的情况下依然能接入并上报，最长持续 **300s**（认证缓存 TTL）。而**同一动作在指令面立即生效**（返回 4006）—— 同一个「停用产品」动作，三个面不同步。
+- **场景**：汤园追问「产品停用后，其下所有设备都会被禁用吗？」，顺带审计级联链路时发现。
+- **排查根因**：认证缓存结构把**两个独立的状态挤在一个 key 里**。
+  - 设备缓存 `auth:v2:{deviceKey}` = `secret|deviceEnabled|**productEnabled**`，TTL **300s**；
+  - 停用**设备**时 `DeviceServiceImpl.updateStatus` 会逐个 `evictAuthCache(k)` → **即时生效** ✅；
+  - 但停用**产品**时 `ProductServiceImpl.updateStatus` **只清 `prod:enabled:{productKey}`**，没有任何扇出清理子设备缓存的动作；
+  - 而 `authenticate()` 与 `isDeviceEnabled()` 命中的是**设备缓存**，其中的 `productEnabled` 位**仍是 1** → 放行。
+  - 指令面走的是 `isProductEnabled()`（读已被清掉的 `prod:enabled:`）→ 所以**只有它是对的**。级联逻辑本身没问题（代码注释里早写明"不改写子设备 status"），漏的是**缓存失效**这一步。
+- **实测复现（2026-09-15，独立测试产品，跑完 `finally` 全量还原 + SQL 清理）**：
+
+  | 观测点 | 实测值 |
+  |---|---|
+  | 产品启用时 | `auth:v2:dev_dev_617d04` = `e05562ac…\|1\|1`；`prod:enabled:p_smoke_cascade` = `1` |
+  | **停用产品后** | `auth:v2:` 设备缓存 **仍为 `…\|1\|1`**（productEnabled 位没变）；`prod:enabled:` = `(nil)` 已清除 |
+  | 剩余 TTL | **299s** ← 即窗口上限 |
+  | **重新认证** | ❌ **通过 PASS(204)** —— 该拒的放行了 |
+  | 对照·指令下发 | ✅ **4006** 立即拦截 |
+
+- **修复**：改为**缓存结构解耦**，而不是"产品停用时扇出清 N 台设备缓存"（后者在千级设备下会退化成一次批量清缓存）：
+  - 缓存前缀 `auth:v2:` → **`auth:v3:`**（旧格式自然过期，无需手工清 Redis）
+  - 值改为 `secret|deviceEnabled|**product_key**` —— 存的是产品 **key**，不再存产品**启用状态**
+  - 认证/遥测判定改为 `deviceEnabled && isProductEnabled(productKey)`，产品状态**每次独立查** `prod:enabled:`（一次 Redis GET ≈0.2ms）
+  - 于是「停用产品」只需清 `prod:enabled:` 这一个 key 即**全量即时生效**，与设备数无关
+- **验证**（重启后重跑同一实验）：`[6]` 由 `PASS(204)` → **`DENY(200)`** ✅。
+  旁证新代码确实在跑：脚本硬编码读 `auth:v2:{dk}` 回显**为空**，而认证返回 204 ——
+  说明缓存已写到 v3 前缀；实测 `auth:v3:dev_dev_943795` = `74547d9e…|1|`**`p_smoke_cascade`**
+  （第三段已是产品 key），且 `auth:v2:*` 残留 **0 条**。对照项指令面仍为 **4006**（无回归）。✅
+- **教训**：**多个独立状态共用一个缓存 key，等于把它们绑成同一个失效边界**。只要其中一个状态有"单独变更"的入口，就必然漏失效 —— 正确做法是**按失效边界拆分 key**，让每个状态各自的变更入口清各自的 key。
+- **状态**：✅ 已修复并实测验证
+
+### BUG-27：停用「产品」后设备**事件上报**链路未被治理——4 条入站链路只封了 3 条
+
+- **现象**：产品（或设备）停用后，设备仍可通过 `/api/v1/events` 上报事件并成功落库（实测入库 **1 行**），而同一次停用下 `/api/v1/telemetry` 已正确拦截（入库 **0 行**）。停用语义出现「半治理」：数据面的三条链路不同步。
+- **场景**：汤园追问「产品停用后，其下所有设备都会被禁用吗？」，逐条审计 4 条设备入站链路时发现。
+- **排查：入站链路 × 启停校验覆盖对照**
+
+  | 链路 | 入口 | 校验点 | 现状 |
+  |---|---|---|---|
+  | 认证 | `POST /api/v1/auth` | `AuthServiceImpl.authenticate()` → `deviceEnabled && isProductEnabled` | ✅ 已管 |
+  | 遥测 | `POST /api/v1/telemetry` | `TelemetryServiceImpl:85` `if (!isDeviceEnabled)` | ✅ 已管 |
+  | 指令 | `POST /devices/{key}/commands` | `CommandServiceImpl:68` `!isProductEnabled` → **4006** | ✅ 已管 |
+  | 事件 | `POST /api/v1/events` | `EventServiceImpl.receive()` **无启停校验** | ❌ **未管** |
+
+- **实测复现（2026-09-15，独立测试产品，跑完 `finally` 全量还原 + SQL 清理）**：停用产品后——
+  - `[A·事件] 实际入库行数 = 1`（**未拦截**）
+  - `[B·遥测] 实际入库行数 = 0`（已拦截）
+  - 清理核对：`product=0 device=0 event=0`，零残留
+- **影响**：停用产品后，仍持有「停用前建立的长连接」的设备，可继续向事件表写数据 → 事件数据被污染、停用语义不完整；且与遥测/指令面表现不一致，排查时易误判。数据本身全保留（软禁用设计），无计费影响。
+- **建议修法**（与遥测入口同构，改动极小）：`EventServiceImpl.receive()` 在「设备存在」判定后补一道
+  `if (!authService.isDeviceEnabled(device.getDeviceKey())) { 计数 + return; }`
+  —— **返回 200 静默丢弃**（不能返错，否则 EMQX webhook 会按失败重投）。
+- **修复**（09-15）：`EventServiceImpl` 注入 `AuthService`；`receive()` 在「设备存在」判定后（`parsePayloadFlexible` 之前）补一道
+  `if (!authService.isDeviceEnabled(request.getDeviceKey())) { log.warn(...); return; }`，
+  即**返回 200 静默丢弃**、不抛异常（抛错会被 EMQX webhook 判为投递失败并重投）。
+  `isDeviceEnabled` 内部已是 `deviceEnabled && isProductEnabled(productKey)`，故**产品级联自动覆盖**，无需另写产品判断。
+  `mvn compile` **EXIT=0**，`EventServiceImpl.class` 重生成 ✅。
+- **验证**（重启后端后跑同一脚本；新进程 PID 27500，启动 19:36:08，晚于改动）：
+
+  | 观测点 | 修复前 | **修复后** |
+  |---|---|---|
+  | `[A·事件] 入库行数` | ❌ **1**（未拦） | ✅ **0**（已拦） |
+  | 事件接口返回 | HTTP 200 | **HTTP 200**（静默丢弃，语义正确） |
+  | `[B·遥测] 入库行数` | 0 | **0**（无回归） |
+  | `[6] 停用后·认证` | DENY(200) | **DENY(200)**（BUG-26 修复仍生效） |
+  | 清理复核 | — | `product=0 device=0 event=0` **零残留** |
+
+- **状态**：✅ 已修复并实测验证
+
