@@ -30,18 +30,26 @@ import java.time.Duration;
  * 「本来就是停用的设备」与「因产品停用而受影响的设备」——信息不可逆丢失。
  * 因此只改产品自己，有效状态在此处实时合成：{@code device.status && product.status}。
  *
- * <h3>缓存格式（v2）</h3>
- * 值 = {@code <secret>|<deviceEnabled>|<productEnabled>}。
- * key 前缀带 {@code v2} 是为了让旧格式缓存自然失效，无需手工清理 Redis。
- * <b>停用状态同样要缓存</b> —— 否则被停用的设备每次重连都穿透打到 DB（停用设备往往还会反复重试）。
+ * <h3>缓存格式（v3）</h3>
+ * 值 = {@code <secret>|<deviceEnabled>|<product_key>}。
+ * <p><b>注意这里存的是 product_key，而不是「产品是否启用」。</b>
+ * v2 曾把 {@code productEnabled} 位也塞进设备缓存，结果是：产品停用时只清了
+ * {@code prod:enabled:} 却清不掉设备缓存，认证回调读到的仍是旧的
+ * {@code productEnabled=1}，<b>停用产品最长 300s 内依然放行</b>
+ * （2026-09-15 实测复现：停用产品后重新认证返回 204）。
+ * 现在改为<b>每次认证独立查产品状态</b>（{@link #isProductEnabled} 走
+ * {@code prod:enabled:} 缓存，一次 Redis GET，约 0.2ms），
+ * 这样「停用产品」只需清理那一个 key 即可全量即时生效，无需按产品扇出清理 N 台设备。
+ * <p>key 前缀带 {@code v3} 是为了让旧格式缓存自然失效，无需手工清理 Redis。
+ * <p><b>停用状态同样要缓存</b> —— 否则被停用的设备每次重连都穿透打到 DB（停用设备往往还会反复重试）。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class AuthServiceImpl implements AuthService {
 
-    /** 带版本号：缓存格式变更时换前缀即可，旧数据自然过期 */
-    private static final String CACHE_PREFIX = "auth:v2:";
+    /** 带版本号：缓存格式变更时换前缀即可，旧数据自然过期（v2 → v3：产品状态移出设备缓存） */
+    private static final String CACHE_PREFIX = "auth:v3:";
     /** 产品启用状态（认证是热路径，避免每次都回查 product 表） */
     private static final String PRODUCT_CACHE_PREFIX = "prod:enabled:";
     private static final long TTL_SEC = 300L;
@@ -57,7 +65,9 @@ public class AuthServiceImpl implements AuthService {
         if (cached != null) {
             String[] parts = cached.split("\\|", 3);
             if (parts.length == 3) {
-                boolean enabled = "1".equals(parts[1]) && "1".equals(parts[2]);
+                // 产品状态**每次独立查**（走 prod:enabled: 缓存），不再从设备缓存里取 ——
+                // 否则「停用产品」必须扇出清掉该产品下全部设备缓存才生效（v2 的漏洞）
+                boolean enabled = "1".equals(parts[1]) && isProductEnabled(parts[2]);
                 return enabled && parts[0].equals(password);
             }
             log.warn("认证缓存格式异常，拒绝接入: device_key={}", deviceKey);
@@ -72,19 +82,19 @@ public class AuthServiceImpl implements AuthService {
         }
 
         boolean deviceEnabled = device.getStatus() != null && device.getStatus() == 1;
-        boolean productEnabled = isProductEnabled(device.getProductKey());
 
-        // 3. 回填缓存（停用状态也缓存）
+        // 3. 回填缓存（停用状态也缓存）—— 存 product_key，不存产品启用状态
         try {
             redisTemplate.opsForValue().set(
                     CACHE_PREFIX + deviceKey,
-                    device.getDeviceSecret() + "|" + (deviceEnabled ? 1 : 0) + "|" + (productEnabled ? 1 : 0),
+                    device.getDeviceSecret() + "|" + (deviceEnabled ? 1 : 0) + "|" + device.getProductKey(),
                     Duration.ofSeconds(TTL_SEC));
         } catch (Exception e) {
             log.debug("认证缓存写入失败: {}", e.getMessage());
         }
 
-        return deviceEnabled && productEnabled && device.getDeviceSecret().equals(password);
+        return deviceEnabled && isProductEnabled(device.getProductKey())
+                && device.getDeviceSecret().equals(password);
     }
 
     /** 产品启用状态（Redis 缓存 5 分钟）。产品不存在时按"启用"处理，交由上层判空。 */
@@ -113,12 +123,13 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public boolean isDeviceEnabled(String deviceKey) {
-        // 复用认证缓存：value = secret|deviceEnabled|productEnabled
+        // 复用认证缓存：value = secret|deviceEnabled|product_key
         String cached = redisTemplate.opsForValue().get(CACHE_PREFIX + deviceKey);
         if (cached != null) {
             String[] parts = cached.split("\\|", 3);
             if (parts.length == 3) {
-                return "1".equals(parts[1]) && "1".equals(parts[2]);
+                // 与 authenticate 同源：产品状态独立查，保证「停用产品」在接入侧与上报侧同步生效
+                return "1".equals(parts[1]) && isProductEnabled(parts[2]);
             }
         }
 

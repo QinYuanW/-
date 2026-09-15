@@ -10,6 +10,7 @@ import com.iot.platform.entity.Product;
 import com.iot.platform.mapper.DeviceEventMapper;
 import com.iot.platform.mapper.DeviceMapper;
 import com.iot.platform.mapper.ProductMapper;
+import com.iot.platform.service.AuthService;
 import com.iot.platform.service.EventService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -51,6 +52,8 @@ public class EventServiceImpl implements EventService {
     private final ProductMapper productMapper;
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
+    /** F2/BUG-27：事件入口同样要兜住「停用后仍持有长连接」的设备 */
+    private final AuthService authService;
 
     @Override
     public void receive(EventRequest request) {
@@ -62,6 +65,16 @@ public class EventServiceImpl implements EventService {
             Device device = resolveDevice(request.getDeviceKey());
             if (device == null) {
                 log.warn("事件上报的设备不存在，丢弃: {}", request.getDeviceKey());
+                return;
+            }
+
+            // F2 停用拦截（BUG-27）：与遥测入口（TelemetryServiceImpl#processSync）同构。
+            // 认证回调只拦得住**新连接**，停用前已建立的长连接必须靠每个入口各自兜底，
+            // 否则「停用」不彻底 —— 事件链路此前漏的正是这道闸。
+            // 语义上**返回 200 静默丢弃**（不抛异常）：事件是"已发生"的事实，
+            // 且本接口是 EMQX webhook，抛错会被判为投递失败并触发重投，反而放大脏数据。
+            if (!authService.isDeviceEnabled(request.getDeviceKey())) {
+                log.warn("事件上报的设备/所属产品已停用，丢弃: {}", request.getDeviceKey());
                 return;
             }
 

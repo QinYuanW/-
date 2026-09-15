@@ -254,7 +254,13 @@ public class ProductServiceImpl implements ProductService {
                 .eq(Product::getProductKey, productKey)
                 .set(Product::getStatus, status));
 
-        // 立即失效产品状态缓存（认证回调侧 TTL 5min），让停用/启用不必等缓存自然过期
+        // 立即失效产品状态缓存（认证/遥测侧 TTL 5min），让停用/启用不必等缓存自然过期。
+        //
+        // ⚠️ 这里**只需清这一个 key**，无需扇出清理该产品下 N 台设备的 auth 缓存 ——
+        // 因为 v3 起设备缓存只存 {secret|deviceEnabled|product_key}，产品启用状态一律
+        // 现查 prod:enabled:（见 AuthServiceImpl 的缓存格式说明）。
+        // v2 时代产品状态曾缓存在设备条目里，导致停用产品在该 key 自然过期前（最长 300s）
+        // 仍然放行设备接入 —— 2026-09-15 已实测复现并修复（BUG-26）。
         authService.evictProductCache(productKey);
         log.info("产品[{}] 状态 → {}{}", productKey, status,
                 status == 1 ? "（启用）" : "（停用：该产品下所有设备将无法接入）");
