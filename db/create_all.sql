@@ -130,3 +130,20 @@ CREATE TABLE IF NOT EXISTS device_event (
   KEY idx_device_ts (device_id, ts),
   KEY idx_device_event_ts (device_id, event_key, ts)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- E4 设备分组。刻意保持「平铺一级」而非树形：设备分组的实际用法是"按位置/用途分几组"，
+-- 层级带来的递归查询与前端树组件成本换不来对应价值；若日后确需层级，加 parent_id 即可平滑扩展。
+-- 设备归属用 device.group_id（一对多）而非中间表：一个设备同时属于多个分组在运维语义上无意义，
+-- "多维度标记"的需求交给 device.tags（逗号分隔）覆盖。
+CREATE TABLE IF NOT EXISTS device_group (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  name VARCHAR(64) NOT NULL,
+  description VARCHAR(255) NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  deleted TINYINT NOT NULL DEFAULT 0,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_group_name (name, deleted),
+  KEY idx_sort (sort_order)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
