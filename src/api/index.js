@@ -41,14 +41,29 @@ http.interceptors.response.use(
 export const login = (username, password) =>
   http.post('/login', { username, password })
 
-export const listDevices = (page = 1, size = 20, keyword = '', productKey = '', onlineStatus = 0) =>
+/**
+ * 设备列表。
+ *
+ * @param {number|null} groupId 分组筛选：`null`/`undefined` = 不过滤；`0` = **未分组**；`>0` = 具体分组
+ *   ⚠️ 这里**不能**写 `groupId || undefined` —— `0`（未分组）是有效值，会被 `||` 当假值丢掉，
+ *   导致「未分组」筛选静默失效（实测踩过）。
+ */
+export const listDevices = (
+  page = 1,
+  size = 20,
+  keyword = '',
+  productKey = '',
+  onlineStatus = 0,
+  groupId = null
+) =>
   http.get('/devices', {
     params: {
       page,
       size,
       keyword: keyword || undefined,
       product_key: productKey || undefined,
-      online_status: onlineStatus > 0 ? onlineStatus : undefined
+      online_status: onlineStatus > 0 ? onlineStatus : undefined,
+      group_id: groupId === null || groupId === undefined ? undefined : groupId
     }
   })
 

@@ -174,8 +174,9 @@ async function removeGroup(g) {
 }
 
 // 点卡片跳到设备列表并按该分组筛选（0 = 未分组）
+// ⚠️ 设备列表的路由是 `/`（name: 'console'），**没有 /devices** —— 用 name 跳转避免路径写错
 function goDevices(groupId) {
-  router.push({ path: '/devices', query: { group_id: groupId } })
+  router.push({ name: 'console', query: { group_id: groupId } })
 }
 
 onMounted(load)
