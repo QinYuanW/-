@@ -1,10 +1,11 @@
 # EMQX 配置方案（MVP）
 
-> 版本：v1.1  日期：2026-09-05
+> 版本：v1.2  日期：2026-09-16
 > 对象：EMQX 5.8 开源版（Docker）
 > 依赖：`API契约.md`（回调 URL）+ `db/schema.sql`（鉴权凭据）
 > 配置方式：**Dashboard 图形化为主**（已挂 `emqx_data` 卷，重启不丢），HOCON 配置附后作参考。
 > v1.1 变更：§1 Topic 约定表与 §4 下发示例的指令 payload 对齐代码实现——统一为 `{"request_id","command_type","payload"}` 三层结构（见 `CommandServiceImpl.buildDownMessage()` 与固件 `platform_mqtt.c handle_command()`）；原扁平格式 `{"property_key":"switch","value":true}` 已废弃，不再使用。
+> v1.2 变更（F2）：新增 §5 **MQTT over TLS（8883）**——自签证书（带 SAN）替换 EMQX 无 SAN 默认证书，`certs/` 目录随仓库版本化、走 bind mount；§2.3 补充拒绝响应必须声明 `Content-Type: application/json`（BUG-29）。
 
 ***
 
@@ -69,6 +70,7 @@ EMQX 在 Docker 容器里、SpringBoot 在宿主机，**双向调用地址完全
 设备 ◀──CONNACK── EMQX
 ```
 
+> ⚠️ **拒绝响应必须带 `Content-Type: application/json`**（BUG-29）：`{"result":"deny"}` 若以 `text/plain` 返回，EMQX 5.x 判为 `unsupported_content_type` → `parse_http_response_failed`，靠 fail-closed 才拒绝，且每次拒绝刷 ERROR 日志。后端 `AuthController` 已显式声明。
 > 认证结果缓存 TTL 60s 意味着：同一设备 60s 内重连不重复打接口，直接命中缓存。这是需求文档 7.4「连接风暴」的第一道防线。
 > ⚠️ EMQX 5.x 的认证结果缓存实为「External Resource Cache」（节点级开关，默认 1 分钟，Dashboard 认证页右上角），部分文档标注 5.9+ 才支持。项目锁定 5.8，装好后需实测该入口是否存在；若无，防连接风暴靠后端 Redis 凭据缓存（契约 §1）兜底。
 
@@ -164,6 +166,48 @@ EMQX 5.8 的「规则 + 桥接」是 **Connector / Action / Rule 三层**，API 
 ```
 
 > `payload` 是**字符串**（JSON 序列化后），不是对象。这是 EMQX REST API 的一个常见坑。
+
+***
+
+## 5. MQTT over TLS（8883）— F2
+
+### 5.1 现状（零 Dashboard 改动）
+
+EMQX 5.8 自带 `ssl:default` listener，已绑定 `0.0.0.0:8883`，证书路径固定指向 `${EMQX_ETC_DIR}/certs/{cert,key,cacert}.pem`。因此**只需替换这三个文件 + 重启容器**，无需动任何 listener 配置：
+
+| 参数 | 值 | 说明 |
+| --- | --- | --- |
+| listener | `ssl:default` | 类型 `ssl`，`enable_authn = true` |
+| bind | `0.0.0.0:8883` | compose 已映射 `8883:8883` |
+| verify | `verify_none` | **单向 TLS**：客户端校验服务器，服务器不校验客户端证书 |
+| certfile / keyfile / cacertfile | `${EMQX_ETC_DIR}/certs/*.pem` | 由 compose 的 `./certs:/opt/emqx/etc/certs:ro` 提供 |
+
+### 5.2 为什么必须换证书
+
+EMQX 自带证书 `CN=Server` 且**无 SAN**。现代 TLS 栈（ESP32 esp-tls / 浏览器 / paho）**只认 SAN、不认 CN**，设备用 `localhost`/局域网 IP 连接 8883 必然校验失败。F2 用一张带 SAN 的自签证书替换之。
+
+### 5.3 证书生成与接线
+
+```bash
+# 生成（在 EMQX 容器内跑，镜像自带 openssl 3.x；SAN_IP 填宿主局域网 IP）
+docker exec -e SAN_IP=10.254.217.62 emqx sh /opt/emqx/etc/certs/gen-certs.sh
+docker restart emqx
+```
+
+- 生成脚本与说明见仓库 `certs/`（`gen-certs.sh` / `README.md`）；证书/私钥为构建产物，**不入库**（`.gitignore` 排除 `*.pem / *.key / *.csr / *.srl / san.cnf`）。
+- **换证书 = 替换文件 + 重启**，不依赖 `docker cp`（`docker cp` 在容器重建后会丢，TLS 会静默退回无 SAN 的默认证书 → 排查起来很隐蔽）。
+
+### 5.4 端到端验证（2026-09-16 实测 · paho-mqtt）
+
+| 用例 | 端口 | 证书校验 | 密钥 | 结果 |
+| --- | :---: | :---: | :---: | --- |
+| A | 8883 | ✅ ca_certs | 正确 | `CONNACK 0 Success` —— **TLS 握手 + 认证回调全通** |
+| B | 8883 | ✅ ca_certs | 错误 | `CONNACK 135 Not authorized` —— 认证在 TLS 之上仍生效 |
+| C | 1883 | 明文 | 正确 | `CONNACK 0 Success`（对照组） |
+| D | 8883 | ❌ 不校验 | 正确 | `CONNACK 0 Success` —— 加密但不校验对端，仅演示降级风险 |
+
+> 服务器实际证书：`TLSv1.3`、`CN=localhost`、issuer `YunPingTai-Test-CA`、`SAN = DNS:localhost, IP:127.0.0.1, IP:10.254.217.62`、有效期 10 年。
+> ⚠️ 容器重建（`docker compose down/up`）已验证：因证书走 bind mount、认证器配置持久在 `emqx_data` 卷，重建后 4 组用例结果完全复现。
 
 ***
 

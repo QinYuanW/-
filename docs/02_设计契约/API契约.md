@@ -43,7 +43,7 @@
 
 ### 0.3 鉴权说明（重要区别）
 
-- **接口 1（设备鉴权回调）**：不走统一 code 格式，遵循 **EMQX 5.x 认证协议**——`204` = 通过；`200` + body `result` 字段（`allow`/`deny`）判定。⚠️ 这是 5.x 协议，与 4.x 的「200=通过 / 403=拒绝」不兼容。
+- **接口 1（设备鉴权回调）**：不走统一 code 格式，遵循 **EMQX 5.x 认证协议**——`204` = 通过；`200` + body `result` 字段（`allow`/`deny`）判定，**且拒绝时 `Content-Type` 必须为 `application/json`**（详见 §1，BUG-29）。⚠️ 这是 5.x 协议，与 4.x 的「200=通过 / 403=拒绝」不兼容。
 - **接口 2（Webhook 上报）**：EMQX 内部调用，MVP 阶段不鉴权（内网直连）。
 - **接口 3/4（查询/下发）**：控制台登录后携带 JWT（`Authorization: Bearer <token>`），**已强制校验**（`WebMvcConfig` 注册 `JwtInterceptor`，匹配 `/api/v1/**`）。无 token / token 非法或过期 → 返回 `401`；校验通过放行。
 - **接口 5（控制台登录）**：`POST /api/v1/login` 校验用户名密码（BCrypt），签发 JWT（HS256，默认 2h 过期）。
@@ -85,14 +85,16 @@
 |------|:---:|------|
 | 认证通过 | `204` | 无（推荐，最简） |
 | 认证通过（等价写法） | `200` | `{"result": "allow"}`（content-type: application/json） |
-| 认证拒绝 | `200` | `{"result": "deny"}` |
+| 认证拒绝 | `200` | `{"result": "deny"}`（**content-type 必须 `application/json`**） |
 | 服务异常（交由认证链） | `4xx/5xx` | 忽略 body |
+
+> ⚠️ **拒绝响应的 `Content-Type` 必须是 `application/json`**（BUG-29）。EMQX 5.x 会校验响应头：若把 `{"result":"deny"}` 以 `text/plain` 返回（Spring 对 String 返回值的默认类型），EMQX 记 `unsupported_content_type → parse_http_response_failed`，只能靠 fail-closed 兜底拒绝，且每次拒绝刷 ERROR 日志；语义上更糟——一旦解析失败被判为 `ignore`（继续认证链），就可能误放行。
 
 > ⚠️ EMQX 4.x 用「200=允许 / 403=拒绝」，5.x 已改为 body 的 `result` 字段 + 204 语义，两者不兼容。若返回 200 但 body 缺 `result` 字段，EMQX 判为 `ignore`（继续认证链，单认证器链尾默认拒绝），合法设备会被拒之门外。
 
 **业务逻辑（D3 实现，F3 起 secret 以密文入缓存）：**
 1. 取 `username`（即 `device_key`）查 Redis `auth:v4:{device_key}` → `secret密文|启用位|product_key`（缓存未命中则查 `device` 表回填）。
-2. 对 secret **AES-256-GCM 解密**（历史明文直接兼容，认证通过后懒迁移转密）后比对 `password`，且设备/产品均启用 → 通过返回 `204`，否则返回 `200` + `{"result":"deny"}`。
+2. 对 secret **AES-256-GCM 解密**（历史明文直接兼容，认证通过后懒迁移转密）后比对 `password`，且设备/产品均启用 → 通过返回 `204`，否则返回 `200` + `{"result":"deny"}`（`Content-Type: application/json`）。
 3. EMQX 侧开启认证结果缓存，防连接风暴（见 EMQX 配置 §2.2）。
 
 ---

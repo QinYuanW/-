@@ -12,6 +12,14 @@
 - **修复**：`ALTER TABLE device MODIFY COLUMN device_secret VARCHAR(128) NOT NULL`（真实库）+ schema.sql / 数据库表设计说明.md 同步为 VARCHAR(128)，注释改为「F3 起 AES-256-GCM 密文（v1: 前缀）」。
 - **状态**：✅ 已修复（F3 端到端验证 11/11 通过：注册密文入库 / 认证解密 204 / 错误密码 deny / 缓存命中二次认证 / 旧明文懒迁移转密）。
 
+### BUG-29：设备认证被拒时 EMQX 刷 `parse_http_response_failed` —— 拒绝响应 `Content-Type` 是 `text/plain` 而非 JSON
+
+- **现象**：F2 做 TLS 实测时，用错误密钥连 8883 得到 `CONNACK 135 Not authorized`（结果正确），但 EMQX 日志每次都刷：`tag: AUTHN ... msg: parse_http_response_failed, reason: unsupported_content_type, body: <<"{\"result\":\"deny\"}">>, content_type: <<"text/plain;charset=UTF-8">>`。
+- **场景**：`AuthController#authenticate` 拒绝分支 `ResponseEntity.ok("{\"result\":\"deny\"}")` —— 返回的是 **String**，Spring MVC 默认按 `text/plain;charset=UTF-8` 输出。
+- **排查根因**：EMQX 5.x 的 `auth_http` **会校验响应 `Content-Type`**，非 JSON 直接判 `unsupported_content_type` → `parse_http_response_failed`。当前只是「解析失败 → fail-closed」恰好拒绝，属于**语义脆弱**：① 每次拒绝都刷 ERROR，淹没真实错误；② 一旦 EMQX 把解析失败按 `ignore` 处理（继续认证链），若链上还有放行型认证器就会**误放行**。
+- **修复**：拒绝分支显式声明 media type —— `ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body("{\"result\":\"deny\"}")`；`API契约.md` §1 与 `EMQX配置方案.md` §2.3 同步补「拒绝响应必须 `application/json`」。
+- **状态**：✅ 已修复（F2 一并验证）。
+
 ## 2026-09-12
 
 ### BUG-22：MySQL57 意外停止（BUG-3 磁盘 I/O 卡顿升级版）——`Windows aio` 返回 OS error 121，InnoDB 放弃运行
