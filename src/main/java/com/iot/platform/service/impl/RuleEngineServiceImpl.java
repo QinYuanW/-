@@ -15,11 +15,14 @@ import com.iot.platform.service.CommandService;
 import com.iot.platform.service.RuleEngineService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.Cursor;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -82,6 +85,35 @@ public class RuleEngineServiceImpl implements RuleEngineService {
         } catch (Exception e) {
             // 规则引擎整体失败绝不能影响遥测主链路
             log.warn("规则引擎异常（已忽略）: device_key={}, err={}", request.getDeviceKey(), e.getMessage());
+        }
+    }
+
+    @Override
+    public void evictRuleCache(String productKey) {
+        if (productKey == null || productKey.isEmpty()) return;
+        try {
+            redisTemplate.delete(RULE_CACHE_PREFIX + productKey);
+            log.debug("已清规则缓存: product_key={}", productKey);
+        } catch (Exception e) {
+            log.debug("清除规则缓存失败: product_key={} ({})", productKey, e.getMessage());
+        }
+    }
+
+    @Override
+    public void evictCooldown(Long ruleId) {
+        if (ruleId == null) return;
+        // `rule:cd:{id}:*` 里的冒号是硬分隔符，天然不会让 id=1 命中 id=12（前缀对不上）
+        String pattern = COOLDOWN_PREFIX + ruleId + ":*";
+        try (Cursor<String> cursor = redisTemplate.scan(
+                ScanOptions.scanOptions().match(pattern).count(200).build())) {
+            List<String> keys = new ArrayList<>();
+            cursor.forEachRemaining(keys::add);
+            if (!keys.isEmpty()) {
+                redisTemplate.delete(keys);
+                log.debug("已清规则[{}]冷却键 {} 个（改完规则立即可重新触发）", ruleId, keys.size());
+            }
+        } catch (Exception e) {
+            log.debug("清除规则冷却键失败: rule_id={} ({})", ruleId, e.getMessage());
         }
     }
 

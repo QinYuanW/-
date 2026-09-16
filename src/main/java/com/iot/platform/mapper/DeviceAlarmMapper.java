@@ -55,6 +55,20 @@ public interface DeviceAlarmMapper extends BaseMapper<DeviceAlarm> {
     @Select("SELECT COUNT(*) FROM device_alarm WHERE created_at >= #{start}")
     long countSince(@Param("start") String start);
 
+    /**
+     * 按规则 id 批量统计告警数（规则列表页的「累计触发」列）。
+     *
+     * <p>一次 {@code GROUP BY} 取全量，避免列表逐条 count 的 N+1。
+     * 规则删除后 {@code rule_id} 成为孤儿引用，故用 {@code IN} 而不是 JOIN 规则表。
+     */
+    @Select("<script>" +
+            "SELECT rule_id AS ruleId, COUNT(*) AS cnt FROM device_alarm " +
+            "WHERE rule_id IN " +
+            "<foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach>" +
+            " GROUP BY rule_id" +
+            "</script>")
+    List<Map<String, Object>> countByRuleIds(@Param("ids") List<Long> ids);
+
     @Select("SELECT COUNT(*) FROM device_alarm")
     long countAll();
 }
