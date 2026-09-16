@@ -1,0 +1,3 @@
+# certs/gen-certs.sh 是**在 Linux 容器（EMQX）里用 sh 执行**的脚本，且通过 bind mount 直接暴露给容器。
+# 本机 core.autocrlf=true，若不锁定行尾，Windows 检出时会转成 CRLF → 容器内 sh 会因行尾 \r 报错。
+*.sh text eol=lf
