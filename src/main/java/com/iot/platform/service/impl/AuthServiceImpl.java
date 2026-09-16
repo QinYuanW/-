@@ -1,11 +1,13 @@
 package com.iot.platform.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.iot.platform.entity.Device;
 import com.iot.platform.entity.Product;
 import com.iot.platform.mapper.DeviceMapper;
 import com.iot.platform.mapper.ProductMapper;
 import com.iot.platform.service.AuthService;
+import com.iot.platform.util.SecretCipher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -30,8 +32,11 @@ import java.time.Duration;
  * 「本来就是停用的设备」与「因产品停用而受影响的设备」——信息不可逆丢失。
  * 因此只改产品自己，有效状态在此处实时合成：{@code device.status && product.status}。
  *
- * <h3>缓存格式（v3）</h3>
- * 值 = {@code <secret>|<deviceEnabled>|<product_key>}。
+ * <h3>缓存格式（v4，F3 起）</h3>
+ * 值 = {@code <secret密文>|<deviceEnabled>|<product_key>}。
+ * <p><b>v3 → v4 的变更：secret 不再以明文进缓存。</b>
+ * F3 后库中 {@code device_secret} 已是 AES-256-GCM 密文，缓存与库同源存密文，
+ * 比对时经 {@link SecretCipher#decrypt} 还原明文 —— 消除 Redis 这一处明文泄露面。
  * <p><b>注意这里存的是 product_key，而不是「产品是否启用」。</b>
  * v2 曾把 {@code productEnabled} 位也塞进设备缓存，结果是：产品停用时只清了
  * {@code prod:enabled:} 却清不掉设备缓存，认证回调读到的仍是旧的
@@ -40,7 +45,7 @@ import java.time.Duration;
  * 现在改为<b>每次认证独立查产品状态</b>（{@link #isProductEnabled} 走
  * {@code prod:enabled:} 缓存，一次 Redis GET，约 0.2ms），
  * 这样「停用产品」只需清理那一个 key 即可全量即时生效，无需按产品扇出清理 N 台设备。
- * <p>key 前缀带 {@code v3} 是为了让旧格式缓存自然失效，无需手工清理 Redis。
+ * <p>key 前缀带 {@code v4} 是为了让旧格式缓存自然失效，无需手工清理 Redis。
  * <p><b>停用状态同样要缓存</b> —— 否则被停用的设备每次重连都穿透打到 DB（停用设备往往还会反复重试）。
  */
 @Slf4j
@@ -48,8 +53,8 @@ import java.time.Duration;
 @RequiredArgsConstructor
 public class AuthServiceImpl implements AuthService {
 
-    /** 带版本号：缓存格式变更时换前缀即可，旧数据自然过期（v2 → v3：产品状态移出设备缓存） */
-    private static final String CACHE_PREFIX = "auth:v3:";
+    /** 带版本号：缓存格式变更时换前缀即可，旧数据自然过期（v3 → v4：secret 以密文入缓存，见 F3） */
+    private static final String CACHE_PREFIX = "auth:v4:";
     /** 产品启用状态（认证是热路径，避免每次都回查 product 表） */
     private static final String PRODUCT_CACHE_PREFIX = "prod:enabled:";
     private static final long TTL_SEC = 300L;
@@ -57,10 +62,12 @@ public class AuthServiceImpl implements AuthService {
     private final DeviceMapper deviceMapper;
     private final ProductMapper productMapper;
     private final StringRedisTemplate redisTemplate;
+    /** F3：库中 device_secret 为密文，认证比对前须解密；历史明文设备在此兼容并懒迁移 */
+    private final SecretCipher secretCipher;
 
     @Override
     public boolean authenticate(String deviceKey, String password) {
-        // 1. 命中缓存
+        // 1. 命中缓存（v4：parts[0] 为密文，比对前须解密）
         String cached = redisTemplate.opsForValue().get(CACHE_PREFIX + deviceKey);
         if (cached != null) {
             String[] parts = cached.split("\\|", 3);
@@ -68,7 +75,7 @@ public class AuthServiceImpl implements AuthService {
                 // 产品状态**每次独立查**（走 prod:enabled: 缓存），不再从设备缓存里取 ——
                 // 否则「停用产品」必须扇出清掉该产品下全部设备缓存才生效（v2 的漏洞）
                 boolean enabled = "1".equals(parts[1]) && isProductEnabled(parts[2]);
-                return enabled && parts[0].equals(password);
+                return enabled && secretEquals(parts[0], password);
             }
             log.warn("认证缓存格式异常，拒绝接入: device_key={}", deviceKey);
             return false;
@@ -83,18 +90,49 @@ public class AuthServiceImpl implements AuthService {
 
         boolean deviceEnabled = device.getStatus() != null && device.getStatus() == 1;
 
-        // 3. 回填缓存（停用状态也缓存）—— 存 product_key，不存产品启用状态
+        // 3. 解密比对；历史明文设备在认证通过后顺手转密（懒迁移，兼容见 SecretCipher#decrypt）
+        String rawSecret = device.getDeviceSecret();
+        String plainSecret;
+        try {
+            plainSecret = secretCipher.decrypt(rawSecret);
+        } catch (Exception e) {
+            log.warn("device_secret 解密失败，拒绝接入: device_key={} ({})", deviceKey, e.getMessage());
+            return false;
+        }
+        boolean matched = deviceEnabled && isProductEnabled(device.getProductKey())
+                && plainSecret != null && plainSecret.equals(password);
+
+        // 4. 回填缓存（停用状态也缓存；secret 以密文入缓存，与库同源）—— 存 product_key，不存产品启用状态
+        String cacheSecret = rawSecret;
+        if (matched && rawSecret != null && !rawSecret.startsWith("v1:")) {
+            // F3 懒迁移：存量明文 → 加密回写，本次起库中只存密文（并发双写各自可解密，无害）
+            cacheSecret = secretCipher.encrypt(plainSecret);
+            deviceMapper.update(null, new LambdaUpdateWrapper<Device>()
+                    .set(Device::getDeviceSecret, cacheSecret)
+                    .eq(Device::getId, device.getId()));
+            log.info("device_secret 懒迁移完成: device_key={}", deviceKey);
+        }
         try {
             redisTemplate.opsForValue().set(
                     CACHE_PREFIX + deviceKey,
-                    device.getDeviceSecret() + "|" + (deviceEnabled ? 1 : 0) + "|" + device.getProductKey(),
+                    cacheSecret + "|" + (deviceEnabled ? 1 : 0) + "|" + device.getProductKey(),
                     Duration.ofSeconds(TTL_SEC));
         } catch (Exception e) {
             log.debug("认证缓存写入失败: {}", e.getMessage());
         }
 
-        return deviceEnabled && isProductEnabled(device.getProductKey())
-                && device.getDeviceSecret().equals(password);
+        return matched;
+    }
+
+    /** 库/缓存中的 secret（密文或历史明文）与传入密码比对；解密失败视为不匹配 */
+    private boolean secretEquals(String stored, String password) {
+        try {
+            String plain = secretCipher.decrypt(stored);
+            return plain != null && plain.equals(password);
+        } catch (Exception e) {
+            log.warn("device_secret 解密失败，拒绝接入: {}", e.getMessage());
+            return false;
+        }
     }
 
     /** 产品启用状态（Redis 缓存 5 分钟）。产品不存在时按"启用"处理，交由上层判空。 */

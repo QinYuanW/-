@@ -24,6 +24,7 @@ import com.iot.platform.mapper.ProductMapper;
 import com.iot.platform.service.AuthService;
 import com.iot.platform.service.DeviceService;
 import com.iot.platform.service.ShadowService;
+import com.iot.platform.util.SecretCipher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -54,6 +55,8 @@ public class DeviceServiceImpl implements DeviceService {
     private final ObjectMapper objectMapper;
     /** 用于状态变更后清除认证缓存（F2 启停） */
     private final AuthService authService;
+    /** F3：device_secret 加密存储 —— 库中只落密文，明文仅注册响应一次性返回 */
+    private final SecretCipher secretCipher;
 
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final DateTimeFormatter KEY_TS = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
@@ -158,7 +161,8 @@ public class DeviceServiceImpl implements DeviceService {
             deviceMapper.deleteById(deviceId);
             // 缓存联动：影子 / 鉴权 / device_key→id 映射
             shadowService.clear(deviceKey);
-            redisTemplate.delete(List.of("auth:" + deviceKey, "did:" + deviceKey, "shadow:tsl:" + deviceKey));
+            // auth: 前缀须与 AuthServiceImpl.CACHE_PREFIX 保持一致（当前 v4），清错 key 会留下幽灵缓存
+            redisTemplate.delete(List.of("auth:v4:" + deviceKey, "did:" + deviceKey, "shadow:tsl:" + deviceKey));
             deleted++;
             log.info("device deleted: device_key={}", deviceKey);
         }
@@ -279,7 +283,8 @@ public class DeviceServiceImpl implements DeviceService {
         device.setDeviceName(deviceName);
 
         // ── ③ Service 层自己补充的字段（用户根本没传）──
-        device.setDeviceSecret(secret);             // → 列 device_secret,后端生成的密钥
+        // F3：库中只存密文（AES-256-GCM）；明文 secret 仅在本次注册响应里一次性返回
+        device.setDeviceSecret(secretCipher.encrypt(secret)); // → 列 device_secret,后端生成的密钥（密文）
         device.setProjectId(product.getProjectId()); // → 列 project_id,从 Product 表里查出来的
         device.setOnlineStatus(0);                  // → 列 online_status,默认离线
         device.setStatus(1);                        // → 列 status,默认正常
