@@ -90,9 +90,9 @@
 
 > ⚠️ EMQX 4.x 用「200=允许 / 403=拒绝」，5.x 已改为 body 的 `result` 字段 + 204 语义，两者不兼容。若返回 200 但 body 缺 `result` 字段，EMQX 判为 `ignore`（继续认证链，单认证器链尾默认拒绝），合法设备会被拒之门外。
 
-**业务逻辑（D3 实现）：**
-1. 取 `username`（即 `device_key`）查 Redis `auth:{device_key}` → `device_secret`（缓存未命中则查 `device` 表回填）。
-2. 比对 `password == device_secret` → 通过返回 `204`，否则返回 `200` + `{"result":"deny"}`。
+**业务逻辑（D3 实现，F3 起 secret 以密文入缓存）：**
+1. 取 `username`（即 `device_key`）查 Redis `auth:v4:{device_key}` → `secret密文|启用位|product_key`（缓存未命中则查 `device` 表回填）。
+2. 对 secret **AES-256-GCM 解密**（历史明文直接兼容，认证通过后懒迁移转密）后比对 `password`，且设备/产品均启用 → 通过返回 `204`，否则返回 `200` + `{"result":"deny"}`。
 3. EMQX 侧开启认证结果缓存，防连接风暴（见 EMQX 配置 §2.2）。
 
 ---
@@ -430,6 +430,7 @@
 ```
 
 > `device_secret` 为 16 字节随机 hex（32 字符），**仅注册时返回一次**，后续不提供查询。`device_key` 重复返回 `4001`。
+> **F3 起数据库只存 AES-256-GCM 密文**（`v1:` 前缀，主密钥 `app.device-secret.master-key`，生产经环境变量 `IOT_DEVICE_SECRET_KEY` 注入）；旧明文数据在首次认证通过后自动转密（懒迁移，零停机）。
 
 ### 6.2 批量注册
 
@@ -487,7 +488,7 @@
 | 控制下发 | request_id / status | command.request_id / command.status |
 | 控制下发 | payload | command.payload（JSON） |
 | 设备注册 | product_key / device_key / device_name | device.product_key / device_key / device_name |
-| 设备注册 | device_secret | device.device_secret（16 字节随机 hex） |
+| 设备注册 | device_secret | device.device_secret（16 字节随机 hex，F3 起库中存 AES-256-GCM 密文，明文仅注册响应一次） |
 
 > 这张表就是「表结构 → 接口契约」的推导链，也是面试能讲的点：**先签数据合同，接口入参出参自动确定，不会出现前后端字段对不上的返工**。
 

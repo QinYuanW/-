@@ -58,7 +58,7 @@ CREATE TABLE `device` (
   `device_key`      VARCHAR(64)     NOT NULL                COMMENT '设备唯一标识（MQTT clientId/username）',
   `product_key`     VARCHAR(32)     NOT NULL                COMMENT '所属产品标识',
   `device_name`     VARCHAR(64)     NOT NULL                COMMENT '设备名称（产品内友好名）',
-  `device_secret`   VARCHAR(64)     NOT NULL                COMMENT '设备密钥（MQTT password，生产建议加密存储）',
+  `device_secret`   VARCHAR(128)    NOT NULL                COMMENT '设备密钥（MQTT password）。F3 起 AES-256-GCM 密文（v1: 前缀），明文仅注册响应一次性返回',
   `project_id`      BIGINT UNSIGNED NULL                    COMMENT '所属项目（逻辑外键 → project.id）',
   `online_status`   TINYINT         NOT NULL DEFAULT 0      COMMENT '在线状态：0离线 1在线',
   `last_online_at`  DATETIME(3)     NULL                    COMMENT '最近上线时间',

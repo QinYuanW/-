@@ -2,6 +2,16 @@
 
 > 每解决一个问题/BUG 立即追加记录：现象 / 场景 / 排查根因 / 状态
 
+## 2026-09-16
+
+### BUG-28：F3 设备注册 500 —— `device_secret` 列宽不足（VARCHAR(64) 装不下 AES-GCM 密文）
+
+- **现象**：F3（密钥加密存储）落地后，`POST /api/v1/devices` 注册新设备返回 `{"code":5000,"message":"服务内部错误"}`；`GET /api/v1/devices` 列表正常、登录正常。
+- **场景**：AES-256-GCM 密文格式 `v1:` + Base64(12B IV + 32B 明文 + 16B tag) = 3 + 80 = **83 字符**，而 `device.device_secret` 为 `VARCHAR(64)`（schema.sql 原为 64，注释还写着"生产建议加密存储"）。
+- **排查根因**：`Data truncation: Data too long for column 'device_secret'` → MyBatis `DuplicateKeyException`（实为 truncation）→ 全局异常兜底 500。另发现注册撞 `uk_product_name`（product_key+device_name 联合唯一）也会抛 `Duplicate entry 'p_demo_001-t' for key 'uk_product_name'` → 500，属测试数据撞名而非代码缺陷。
+- **修复**：`ALTER TABLE device MODIFY COLUMN device_secret VARCHAR(128) NOT NULL`（真实库）+ schema.sql / 数据库表设计说明.md 同步为 VARCHAR(128)，注释改为「F3 起 AES-256-GCM 密文（v1: 前缀）」。
+- **状态**：✅ 已修复（F3 端到端验证 11/11 通过：注册密文入库 / 认证解密 204 / 错误密码 deny / 缓存命中二次认证 / 旧明文懒迁移转密）。
+
 ## 2026-09-12
 
 ### BUG-22：MySQL57 意外停止（BUG-3 磁盘 I/O 卡顿升级版）——`Windows aio` 返回 OS error 121，InnoDB 放弃运行
