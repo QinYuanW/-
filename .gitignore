@@ -1,8 +1,8 @@
-# ---- 已独立的子仓库（各自有自己的 git 历史，勿以 gitlink 形式纳管） ----
+# ---- 已独立的子仓库（各自有自己的 git 历史，勿�? gitlink 形式纳管�? ----
 /iot-platform/
 /iot-console/
 
-# ---- 本地生成物 / 缓存 ----
+# ---- 本地生成�? / 缓存 ----
 /tmp/
 /.trae/
 /.workbuddy/
@@ -11,7 +11,7 @@
 build/
 dist/
 
-# ---- 操作系统 / 编辑器 ----
+# ---- 操作系统 / 编辑�? ----
 .DS_Store
 Thumbs.db
 .idea/
@@ -21,6 +21,10 @@ Thumbs.db
 # ---- 敏感信息（如误放，禁止入库） ----
 *.pfx
 *.pem
+*.key
+*.csr
+*.srl
+/certs/san.cnf
 .env
 credentials*
 # db ����ʱ����

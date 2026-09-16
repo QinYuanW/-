@@ -16,6 +16,10 @@ services:
     volumes:
       - emqx_data:/opt/emqx/data
       - emqx_log:/opt/emqx/log
+      # F2：MQTT over TLS(8883) 的自签证书。listener ssl:default 指向 ${EMQX_ETC_DIR}/certs，
+      # 用宿主目录覆盖之——证书随仓库版本化，「换证书 = 替换文件 + 重启」，不依赖 docker cp
+      # （docker cp 在容器重建后会丢，TLS 会静默退回 EMQX 自带的 CN=Server 无 SAN 证书）。
+      - ./certs:/opt/emqx/etc/certs:ro
     environment:
       # Dashboard 初始账号，首次启动生效（登录后请改密码）
       - EMQX_DASHBOARD__DEFAULT_USERNAME=admin
