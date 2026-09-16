@@ -30,6 +30,11 @@
             <el-icon><FolderOpened /></el-icon>
             <span>设备分组</span>
           </el-menu-item>
+          <!-- E3 尾巴：规则管理页（此前规则只能进 MySQL 敲 SQL，有告警无配置入口） -->
+          <el-menu-item index="/rules">
+            <el-icon><Bell /></el-icon>
+            <span>告警规则</span>
+          </el-menu-item>
         </el-sub-menu>
         <el-sub-menu index="ops">
           <template #title>

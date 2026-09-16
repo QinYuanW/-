@@ -186,4 +186,40 @@ export const clearShadow = (deviceKey) =>
 export const listPendingCommands = (deviceKey) =>
   http.get(`/devices/${deviceKey}/commands/pending`)
 
+// ===== E3 尾巴：告警规则管理（契约 §11）=====
+// 补齐「有告警、无配置入口」的断头路：规则引擎早就在跑，但规则一直只能进 MySQL 敲 SQL。
+
+/**
+ * 规则分页。
+ *
+ * @param {number|null} enabled 启停筛选：`null`/`undefined` = 全部；`1` = 启用；`0` = 停用
+ *   ⚠️ 同 listDevices 的 groupId —— **不能**写 `enabled || undefined`，`0` 会被当假值丢掉，
+ *   导致「只看停用」静默失效。
+ */
+export const listRules = (page = 1, size = 20, productKey = '', keyword = '', enabled = null) =>
+  http.get('/rules', {
+    params: {
+      page,
+      size,
+      product_key: productKey || undefined,
+      keyword: keyword || undefined,
+      enabled: enabled === null || enabled === undefined ? undefined : enabled
+    }
+  })
+
+/** 规则详情 */
+export const getRule = (id) => http.get(`/rules/${id}`)
+
+/** 新建规则（返回 { id }） */
+export const createRule = (data) => http.post('/rules', data)
+
+/** 编辑规则（全字段覆盖） */
+export const updateRule = (id, data) => http.put(`/rules/${id}`, data)
+
+/** 启用 / 停用 */
+export const updateRuleStatus = (id, enabled) => http.put(`/rules/${id}/status`, { enabled })
+
+/** 删除规则（逻辑删除，历史告警保留） */
+export const deleteRule = (id) => http.delete(`/rules/${id}`)
+
 export default http

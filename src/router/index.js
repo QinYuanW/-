@@ -42,6 +42,12 @@ const routes = [
         meta: { title: '产品分类', crumb: ['设备管理', '产品分类'] }
       },
       {
+        path: 'rules',
+        name: 'rules',
+        component: () => import('../views/Rules.vue'),
+        meta: { title: '告警规则', crumb: ['设备管理', '告警规则'] }
+      },
+      {
         path: 'devices/:key',
         name: 'device-detail',
         component: () => import('../views/DeviceDetail.vue'),
