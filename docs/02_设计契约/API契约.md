@@ -911,6 +911,102 @@
 
 ---
 
+## 12. 告警规则管理（E3 尾巴）
+
+> 补齐 E3 留下的断头路：**规则引擎（评估）早已落地，但规则的增删改查一直只能进 MySQL 敲 SQL** —— 有告警、无配置入口。
+> 规则存 `device_rule`（DDL 见 `db/create_all.sql`），由 `RuleEngineServiceImpl` 在**每条遥测落库后**评估（链路见 §2 末段）。
+
+### 12.1 GET `/api/v1/rules` — 规则分页
+
+| 参数 | 说明 |
+|------|------|
+| `page` / `size` | 默认 `1` / `20` |
+| `product_key` | 按产品过滤（缺省全部） |
+| `keyword` | 规则名模糊匹配 |
+| `enabled` | `1` 启用 / `0` 停用；**缺省不过滤** |
+
+> ⚠️ `enabled=0`（只看停用）是**有效值**，前端拼参时不能写 `enabled || undefined` —— 否则 `0` 被当假值丢掉，筛选静默失效。
+
+响应 `{total, items[]}`，`items[]` 字段：
+
+| 字段 | 说明 |
+|------|------|
+| `id` / `name` / `product_key` | — |
+| `device_key` | **为空 = 作用于该产品下所有设备** |
+| `property_key` / `operator` / `threshold` | 监测条件。`operator` ∈ `> >= < <= == !=` |
+| `level` | `1` 严重 / `2` 一般 / `3` 提示 |
+| `alarm_type` | 缺省 `规则告警` |
+| `action_type` | `0` 仅告警 / `1` 告警并下发指令 |
+| `action_payload` | `action_type=1` 时下发到设备的 **JSON 对象**（以字符串形式返回） |
+| `cooldown_sec` | 抑制窗口：同规则 + 同设备在该窗口内只告警一次 |
+| `enabled` | `1` 启用 / `0` 停用 |
+| `alarm_count` | **派生字段**（非数据库列）：该规则累计触发的告警数。用于识别"启用中却从没触发过"的配错规则 |
+
+### 12.2 GET `/api/v1/rules/{id}` — 详情
+字段同列表单项（含 `alarm_count`）。
+
+### 12.3 POST `/api/v1/rules` — 新建（响应 `{id}`）
+
+```json
+{
+  "name": "高温自动关断",
+  "product_key": "p_demo_001",
+  "device_key": null,
+  "property_key": "temperature",
+  "operator": ">",
+  "threshold": 50,
+  "level": 1,
+  "alarm_type": "规则告警",
+  "action_type": 1,
+  "action_payload": "{\"switch\": false}",
+  "cooldown_sec": 60,
+  "enabled": 1
+}
+```
+
+**校验（违反一律 `4001`）：**
+
+- `name` 非空且 ≤ 64 字符；
+- `product_key` 必须存在；
+- `device_key` 若给出，必须存在且**归属于该 `product_key`** —— 否则会配出一条"永远不会命中"的规则，且不报错，只能靠猜；
+- `operator` 必须在 `> >= < <= == !=` 内；`level` ∈ 1/2/3；`action_type` ∈ 0/1；`cooldown_sec` ≥ 0；
+- `action_payload`：`action_type=1` 时**必填且必须是 JSON 对象**（数组/裸值/非法 JSON 都拒）；`action_type=0` 时强制置 `NULL`。
+  > ⚠️ `action_payload` 是 MySQL **JSON 列**：空串不是合法 JSON（MySQL 报 `3140 Invalid JSON text`），必须落 `NULL`。
+
+### 12.4 PUT `/api/v1/rules/{id}` — 编辑（全字段覆盖）
+
+> 实现上**必须用显式 `set(...)` 而不是 `updateById`**：MyBatis-Plus 默认跳过 null 字段，而本表 `device_key` / `action_payload` 允许为 NULL —— 用 `updateById` 会导致"从『告警并下发』改回『仅告警』后，旧 payload 清不掉"。
+
+### 12.5 PUT `/api/v1/rules/{id}/status` — 启用 / 停用
+body `{"enabled": 0|1}`。
+
+### 12.6 DELETE `/api/v1/rules/{id}` — 删除（逻辑删）
+`deleted=1`；**历史告警保留** —— `device_alarm.rule_name` 已冗余规则名，删规则后旧告警仍可读（`rule_id` 成孤儿引用，无外键，物理无害）。
+
+### 12.7 ⭐ 写操作一律清两类缓存
+
+由 `RuleEngineService.evictRuleCache()` / `evictCooldown()` 承担：
+
+| 缓存 | 键 | 不清的后果 |
+|------|----|-----------|
+| 规则列表缓存（TTL 60s） | `rules:{product_key}` | 「界面改了、上报还是老规则」的假故障。**改了 `product_key` 时新旧产品都要清** |
+| 冷却窗口（TTL = `cooldown_sec`） | `rule:cd:{ruleId}:{deviceId}` | 改完规则立刻测会被上一次告警的抑制窗口挡住 → 看起来像"改动没生效" |
+
+### 12.8 验证记录（2026-09-16 实测）
+
+| # | 验证 | 实测 |
+|---|------|------|
+| 1 | 列表 | 2 条既有规则 + `alarm_count` 与 SQL 一致 |
+| 2 | 入参校验 6 负例 | 全部 `4001`，文案明确（运算符非法 / 缺 payload / payload 非 JSON / payload 是数组 / 产品不存在 / 级别越界） |
+| 3 | ⭐ 规则缓存失效 | 预热到 `EXISTS rules:p_demo_001 = 1` → 新建后 **= 0**；重新回填的缓存含 **3** 条（原 2 + 新 1） |
+| 4 | 新规则立即生效 | 新建后 **562 ms** 内上报即命中并落 `device_alarm`（远小于 60s TTL，证明确实走了新规则集） |
+| 5 | ⭐ 冷却失效 | 编辑后 `rule:cd:*` 键数 **0**；立刻再报，告警数 **1 → 2** |
+| 6 | 启停 | `enabled` 落库 0/1 正确 |
+| 7 | 逻辑删 | `deleted=1`；列表与详情均查不到；`total` 回到 2 |
+| 8 | 前端浏览器冒烟 | 渲染 2 行、**属性下拉由该产品物模型 TSL 填充**、联动「快捷填充」出现 `开关=false / 开关=true`、编辑弹窗回填条件、开关触发 `PUT /rules/2/status`、**运行时错误 0** |
+
+---
+
 ## 附 · 已实现接口索引（v1.3 之后落地，本节为补录）
 
 > 下列接口**已在代码中实现并运行**，v1.3 文档未收录。此处补录签名（报文细节以代码为准），恢复「本文档 = 接口单一事实源」。
@@ -936,6 +1032,10 @@
 | GET | `/api/v1/devices` | 设备列表（**新增分组筛选**） | E4 | 新增 `group_id`：`>0` 按组过滤，**`=0` 表示未分组**，缺省不过滤 |
 | PUT | `/api/v1/devices/status` | 批量启停设备 | F5 | body `{"device_keys":[],"status":0\|1}`；停用即拒绝 MQTT 接入（认证 + 入口双层），**数据全保留**；响应 `{affected:n}` |
 | PUT | `/api/v1/products/{key}/status` | 启停产品 | F5 | body `{"status":0\|1}`；停用后其下**所有**设备拒绝接入（级联在判断层，不改子设备 `status`） |
+| GET | `/api/v1/rules` | 告警规则列表（E3 尾巴） | §12 | `product_key`/`keyword`/`enabled`/`page`/`size`；`items[].alarm_count` 为派生字段 |
+| GET | `/api/v1/rules/{id}` | 告警规则详情 | §12 | 含 `alarm_count` |
+| POST / PUT / DELETE | `/api/v1/rules[/{id}]` | 规则增删改 | §12 | body 见 §12.3；删除为逻辑删、历史告警保留；**写操作清 `rules:` 与 `rule:cd:`** |
+| PUT | `/api/v1/rules/{id}/status` | 启用 / 停用规则 | §12 | body `{"enabled":0\|1}` |
 > ⚠️ **已移除接口（2026-09-13 汤园决策）**：`POST /api/v1/demo/reset`（G5 演示数据一键重置）及前端 `demoReset` 封装**已整体删除**——清库级接口不应长期留在代码库中（曾在设备页工具栏暴露，误点即全库归零）。
 > 若将来演示确需复位能力，建议**在演示脚本里直接用 SQL**（`db/seed.sql` 即基线定义），不再恢复该 HTTP 端点。
 
