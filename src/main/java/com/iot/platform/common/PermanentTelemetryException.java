@@ -14,11 +14,11 @@ package com.iot.platform.common;
  * 瞬时失败被直接丢弃（BUG-21 的实验证明了后者会静默丢数据）。
  */
 public class PermanentTelemetryException extends RuntimeException {
-
+    // 构造函数
     public PermanentTelemetryException(String message) {
         super(message);
     }
-
+    // 构造函数
     public PermanentTelemetryException(String message, Throwable cause) {
         super(message, cause);
     }

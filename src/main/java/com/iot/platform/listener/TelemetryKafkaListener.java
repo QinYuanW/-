@@ -51,17 +51,34 @@ public class TelemetryKafkaListener {
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
 
+    /** 重试策略
+     * `@RetryableTopic` = 让消费失败的消息 "换主题重试、退避重投、最后进死信"
+     */
     @RetryableTopic(
             attempts = "4",                                        // 1 次主投 + 3 次重试
             backoff = @Backoff(delay = 1000L, multiplier = 2.0, maxDelay = 10000L), // 1→2→4s
             autoCreateTopics = "true",
             topicSuffixingStrategy = TopicSuffixingStrategy.SUFFIX_WITH_INDEX_VALUE, // -retry-0/1/2
-            exclude = {PermanentTelemetryException.class},         // 永久失败不浪费重试
+            exclude = {PermanentTelemetryException.class},         // 这类异常不重试，直接进 DLT，（永久失败异常不浪费重试）
             dltTopicSuffix = "-dlt"
     )
+    /** 消费遥测消息
+     * **`@KafkaListener`** 是 Spring for Apache Kafka 的注解，
+     * 作用：把下面的方法注册成一个**消息监听器**——
+     * 应用启动后框架自动创建监听容器，订阅指定主题，每来一条消息就调用一次该方法。
+     * */
+    /**
+     * @KafkaListener 做的事
+     * Spring Kafka 在项目启动时扫描所有带有 @KafkaListener 注解的方法，然后：
+     *
+     * 自动创建消费者 — 为这个注解创建一个 Kafka Consumer 客户端
+     * 订阅主题 — 订阅 KafkaConfig.TOPIC（即 iot.telemetry）
+     * 轮询拉取 — 启动一个后台线程，不断调用 consumer.poll() 从 Kafka 拉取消息
+     * 消息分发 — 每拉取到一批消息，逐个调用 onMessage(payload)，把消息的 value 作为 payload 参数传进去
+     * */
     @KafkaListener(topics = KafkaConfig.TOPIC, groupId = KafkaConfig.CONSUMER_GROUP)
     public void onMessage(String payload) {
-        TelemetryRequest request = parse(payload);
+        TelemetryRequest request = parse(payload);// 反序列化遥测请求
         telemetryService.processSync(request);
 
         // E2：落库成功后推送给在线控制台。
@@ -79,7 +96,7 @@ public class TelemetryKafkaListener {
             return objectMapper.readValue(payload, TelemetryRequest.class);
         } catch (Exception e) {
             meterRegistry.counter("iot_telemetry_process_failures_total", "result", "permanent").increment();
-            log.warn("telemetry payload 反序列化失败，转 DLT: {}", payload);
+            log.warn("telemetry payload 反序列化失败，转 DLT: {}", payload);// 记录失败日志
             throw new PermanentTelemetryException("telemetry payload 反序列化失败: " + payload, e);
         }
     }

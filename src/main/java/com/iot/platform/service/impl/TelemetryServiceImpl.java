@@ -130,7 +130,7 @@ public class TelemetryServiceImpl implements TelemetryService {
             }
             log.info("telemetry saved: device_key={}, props={}", request.getDeviceKey(), request.getProperties().size());
         } catch (PermanentTelemetryException e) {
-            throw e; // 交给 @RetryableTopic 的 exclude → 跳过重试直达 DLT
+            throw e; // 交给 @RetryableTopic 的 exclude → 跳过重试直达 DLT不重试
         } catch (Exception e) {
             // 瞬时失败（DB 连接断开 / 超时 / 死锁等）：标记为可重试，退避后重来
             meterRegistry.counter("iot_telemetry_process_failures_total", "result", "retryable").increment();
