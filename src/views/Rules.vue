@@ -240,28 +240,38 @@
                 />
                 <span v-else class="pr-empty">先选属性</span>
 
+                <!-- 只有一行时不显示「删除」：删了就没有下发内容了，这个操作没有意义。
+                     不用 :disabled —— Element Plus 对禁用的 link 按钮只做"淡化"，
+                     颜色还在（淡粉/淡蓝），看着仍像能点，反而让人以为是坏的。 -->
                 <el-button
+                  v-if="form.payloadRows.length > 1"
                   link
                   size="small"
                   type="danger"
-                  :disabled="form.payloadRows.length <= 1"
                   @click="removePayloadRow(i)"
                 >
                   删除
                 </el-button>
+
+                <span v-else class="pr-spacer" />
               </div>
 
               <div class="payload-foot">
+                <!-- 可写属性已用尽时，把按钮换成"为什么没有更多可选"的说明，而不是留个点不动的按钮 -->
                 <el-button
+                  v-if="canAddPayloadRow"
                   link
                   type="primary"
                   :icon="Plus"
-                  :disabled="!canAddPayloadRow"
                   @click="addPayloadRow"
                 >
                   添加属性
                 </el-button>
-                <span class="payload-tip">设备离线时自动挂起、上线后补发（期望状态语义）</span>
+                <span v-else-if="writableProps.length" class="payload-note">
+                  该产品的可写属性已全部用上（共 {{ writableProps.length }} 个：
+                  {{ writableNames }}）。要控制别的属性，先去「产品 → 物模型」把它设为可写。
+                </span>
+                <span class="payload-tip">规则命中时一次可下发多个属性；设备离线时挂起、上线补发</span>
               </div>
 
               <div v-if="!writableProps.length" class="payload-warn">
@@ -383,6 +393,11 @@ const dupKeys = computed(
 
 const canAddPayloadRow = computed(
   () => form.value.payloadRows.length < writableProps.value.length
+)
+
+/** 可写属性名列表（用于"已全部用上"的说明文案） */
+const writableNames = computed(() =>
+  writableProps.value.map((p) => p.name || p.key).join('、')
 )
 
 /** 一行是否已填好（⚠️ bool 的 `false` 是有效值，不能按"假值"丢掉） */
@@ -848,6 +863,19 @@ onMounted(async () => {
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+/* 只有一行时占住「删除」的位置，避免右侧元素左右横跳 */
+.pr-spacer {
+  display: inline-block;
+  width: 28px;
+}
+
+/* "可写属性已全部用上"的说明：替代一个点不动的按钮 */
+.payload-note {
+  font-size: 12px;
+  line-height: 1.7;
+  color: #854f0b;
 }
 
 .payload-tip {
