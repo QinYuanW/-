@@ -9,7 +9,7 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * E4 设备分组（平铺一级，见 {@code db/create_all.sql} 中的设计说明）。
+ * E4 设备分组（平铺一级，见 {@code db/schema.sql} 中该表的设计说明）。
  *
  * <p>设备归属通过 {@code device.group_id} 表达（一对多）；"多维度标记"由 {@code device.tags} 承担。
  */
