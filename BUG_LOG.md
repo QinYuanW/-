@@ -13,6 +13,16 @@
 - **状态**：✅ 已修复。
 - ⚠️ **遗留提醒**：`db/seed.sql` 的演示产品还是 3 属性版物模型（真实 `p_demo_001` 已有 5 属性），而它用 `ON DUPLICATE KEY UPDATE name=…, tsl=VALUES(tsl)` —— **在工作库上跑会把现有产品的物模型覆盖回 3 属性**。演示复位前需先决定：是更新 seed 里的 tsl，还是把 `tsl` 从 UPDATE 列表里摘掉。另 `db/init-user.sql` 写的是 `iot/Iot@2026`，与实际使用的 `iot/123456` 不一致，待统一。
 
+- **同日续修 —— 上一段的遗留提醒已处理**：
+  - `db/seed.sql` 改为**只补缺、不覆盖**：三个 INSERT 的 `ON DUPLICATE KEY UPDATE x = VALUES(x)` 统一换成空操作 `ON DUPLICATE KEY UPDATE id = id`（比 `INSERT IGNORE` 好，后者会连"字段超长"这类真错误一起吞掉）；演示产品的 tsl 同时对齐为当前 5 属性版本。
+    **隐患已隔离复现**（临时库）：放一条 5 属性产品 → 跑旧版 upsert → 变回 3 属性（**证实会回滚**）；再跑新版 → 不变；空表首次插入仍补上 1 行（"补缺"职责没丢）。
+    **真实库实测**：执行新版 seed.sql 前后快照**完全一致**（project / product / device 三表内容 + 9 张表行数逐项相同）。
+    ⚠️ `device_secret` 是同类隐患且更隐蔽：F3 起库里存 AES-GCM 密文，而 seed 写的是明文 —— 旧版 upsert 会把**已加密的密钥退回明文**。当前 `dev_demo_001` 尚未认证过、仍是明文，所以覆盖"看不出问题"，**这正是隐患的典型形态**。
+  - `db/init-user.sql` 密码 `Iot@2026` → **`123456`**，与 `application.yml` 的 `spring.datasource.password` 对齐；并补 `ALTER USER ... IDENTIFIED BY` 让脚本真正收敛（`CREATE USER IF NOT EXISTS` 对**已存在**账号不会改密码，是空转）。
+    实测：脚本执行 OK；`iot@%` / `iot@localhost` 均在；**以 iot/123456 连接成功**。
+- **真实库补注释（同日）**：真实库表注释为空、列注释残缺（早期分开建表、注释未落库）。从 `schema.sql` 取**列定义原文**生成 **113 条 ALTER** 并执行 —— 执行前后结构快照（102 条列签名 / 52 条索引 / 23 行分区）**逐行一致**，证明只动了注释；现 0 个表缺注释、102/102 列带注释，`SHOW CREATE TABLE` 每列都有中文说明。
+  动手前先实测确认：MySQL 5.7 里「只改注释」是 **INPLACE**（不重建表）—— 在 98 万行的 `device_telemetry` 上这一点必须先验证再上，不能靠推测。
+
 ## 2026-09-16
 
 ### BUG-28：F3 设备注册 500 —— `device_secret` 列宽不足（VARCHAR(64) 装不下 AES-GCM 密文）
