@@ -231,11 +231,14 @@
                   />
                 </el-select>
 
+                <!-- bool 用下拉「开 / 关」而不是开关：这里选的是**本次下发的目标值**（常量），
+                     一个灰色的 off 开关既像"关"、又像"未设置"、还像"不动它" —— 有歧义 -->
                 <PropertyValueInput
                   v-if="propOf(row.key)"
                   :prop="propOf(row.key)"
                   :model-value="row.value"
                   width="150px"
+                  bool-style="select"
                   @update:model-value="(v) => (row.value = v)"
                 />
                 <span v-else class="pr-empty">先选属性</span>
