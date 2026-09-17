@@ -80,7 +80,15 @@ import { ElMessageBox } from 'element-plus'
 const route = useRoute()
 const router = useRouter()
 
-const activeMenu = computed(() => route.path)
+/**
+ * 侧栏高亮项。
+ *
+ * 优先取 `route.meta.menu`：详情页的 path（`/devices/:key`、`/products/:key`）与任何菜单
+ * index 都不相等，若只按 `route.path` 精确匹配，**进入详情页后侧栏会一个都不高亮**
+ * —— 导航装作你没在任何地方，位置感直接丢失。
+ * 其余页面的 path 与菜单 index 一致，回退到 `route.path` 即可。
+ */
+const activeMenu = computed(() => route.meta.menu || route.path)
 const crumbs = computed(() => route.meta.crumb || [route.meta.title || '设备控制台'])
 const username = localStorage.getItem('iot_username') || 'admin'
 

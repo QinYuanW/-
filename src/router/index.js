@@ -27,7 +27,9 @@ const routes = [
         path: 'products/:key',
         name: 'product-detail',
         component: () => import('../views/ProductDetail.vue'),
-        meta: { title: '产品详情', crumb: ['设备管理', '产品详情'] }
+        // menu：详情页属于哪个菜单项。侧栏高亮按 path 精确匹配，而详情页 path 是
+        // `/products/xxx`，对不上 `/products` → 不高亮（= 导航装作你没在任何地方）。
+        meta: { title: '产品详情', crumb: ['设备管理', '产品详情'], menu: '/products' }
       },
       {
         path: '',
@@ -51,7 +53,8 @@ const routes = [
         path: 'devices/:key',
         name: 'device-detail',
         component: () => import('../views/DeviceDetail.vue'),
-        meta: { title: '设备详情', crumb: ['设备管理', '设备详情'] }
+        // 同上：设备详情归属「设备」（菜单 index 为 `/`）
+        meta: { title: '设备详情', crumb: ['设备管理', '设备详情'], menu: '/' }
       }
     ]
   }
