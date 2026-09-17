@@ -914,7 +914,7 @@
 ## 12. 告警规则管理（E3 尾巴）
 
 > 补齐 E3 留下的断头路：**规则引擎（评估）早已落地，但规则的增删改查一直只能进 MySQL 敲 SQL** —— 有告警、无配置入口。
-> 规则存 `device_rule`（DDL 见 `db/create_all.sql`），由 `RuleEngineServiceImpl` 在**每条遥测落库后**评估（链路见 §2 末段）。
+> 规则存 `device_rule`（DDL 见 `db/schema.sql` §9），由 `RuleEngineServiceImpl` 在**每条遥测落库后**评估（链路见 §2 末段）。
 
 ### 12.1 GET `/api/v1/rules` — 规则分页
 

@@ -2,6 +2,17 @@
 
 > 每解决一个问题/BUG 立即追加记录：现象 / 场景 / 排查根因 / 状态
 
+## 2026-09-17
+
+### 备注：db/ 下曾有三份互相矛盾的 DDL，且没有一份能跑出真实库（非 BUG，属文档漂移）
+
+- **现象**：`db/schema.sql` 自称"全链路数据合同"，却只有 7 张表（缺 E3/E4 的 `device_rule`/`device_alarm`/`device_event`/`device_group`）；`db/create_all.sql` 有这 4 张，却**没有** `product`/`device_telemetry`，且 `device_secret` 还停在 `VARCHAR(64)`（F3 已改 128）；`db/run.sql`、`db/temp_device.sql` 又是 device 单表的第三、四份副本（同样 64）。真实库是 **11 张表** —— **单跑任何一份都建不出可用库**：别人 clone 下来复现不了，论文附录的 DDL 也与实现对不上。
+- **根因**：V2 每加一批表就写进一个新文件，从不回填权威文件；而配套脚本 `run_tables.ps1` 又指向了副本（create_all.sql），进一步固化了副本"能用"的错觉。
+- **修复**：`db/schema.sql` 升 v1.3（11 张表，结构以 `mysqldump` 导出为准，保留全部设计说明注释）；删除 `create_all.sql` / `run.sql` / `temp_device.sql` / `t.sql` / `test.sql`（后者还会往真实库建垃圾表 `t3`）；`run_tables.ps1` 改为执行 schema.sql（用 mysql 客户端 `SOURCE`，避开 PowerShell 管道把中文默认值转码写坏）；`verify.sql` 断言 7 表 → 11 表；同步修掉引用这些文件的文档与 Java 注释。
+- **验证（证据）**：建临时库跑新 schema.sql，逐表与真实库对比 —— **11/11 表 DDL 一致、102 个列条目一致、52 条索引条目一致、13 个分区一致，零差异**；另实测 `run_tables.ps1` 幂等（执行后表数与行数纹丝不动），并用「SOURCE 不存在的路径必须报错」反证 SOURCE 确实在读文件。
+- **状态**：✅ 已修复。
+- ⚠️ **遗留提醒**：`db/seed.sql` 的演示产品还是 3 属性版物模型（真实 `p_demo_001` 已有 5 属性），而它用 `ON DUPLICATE KEY UPDATE name=…, tsl=VALUES(tsl)` —— **在工作库上跑会把现有产品的物模型覆盖回 3 属性**。演示复位前需先决定：是更新 seed 里的 tsl，还是把 `tsl` 从 UPDATE 列表里摘掉。另 `db/init-user.sql` 写的是 `iot/Iot@2026`，与实际使用的 `iot/123456` 不一致，待统一。
+
 ## 2026-09-16
 
 ### BUG-28：F3 设备注册 500 —— `device_secret` 列宽不足（VARCHAR(64) 装不下 AES-GCM 密文）
