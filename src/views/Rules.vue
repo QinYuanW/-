@@ -214,17 +214,63 @@
 
         <template v-if="form.actionType === 1">
           <el-form-item label="下发内容" required>
-            <el-input
-              v-model="form.actionPayload"
-              type="textarea"
-              :rows="3"
-              placeholder='JSON 对象，如 {"switch": false}'
-            />
-            <div class="payload-tip">
-              <span>设备离线时自动挂起，上线后补发（期望状态语义）。快捷填充：</span>
-              <el-button v-for="ps in payloadPresets" :key="ps.label" link size="small" @click="applyPreset(ps)">
-                {{ ps.label }}
-              </el-button>
+            <div class="payload-editor">
+              <div v-for="(row, i) in form.payloadRows" :key="i" class="payload-row">
+                <el-select
+                  v-model="row.key"
+                  class="pr-prop"
+                  placeholder="选择可写属性"
+                  @change="(k) => onPayloadKeyChange(row, k)"
+                >
+                  <el-option
+                    v-for="p in writableProps"
+                    :key="p.key"
+                    :label="`${p.name || p.key}（${p.key}）`"
+                    :value="p.key"
+                    :disabled="dupKeys.has(p.key) && p.key !== row.key"
+                  />
+                </el-select>
+
+                <PropertyValueInput
+                  v-if="propOf(row.key)"
+                  :prop="propOf(row.key)"
+                  :model-value="row.value"
+                  width="150px"
+                  @update:model-value="(v) => (row.value = v)"
+                />
+                <span v-else class="pr-empty">先选属性</span>
+
+                <el-button
+                  link
+                  size="small"
+                  type="danger"
+                  :disabled="form.payloadRows.length <= 1"
+                  @click="removePayloadRow(i)"
+                >
+                  删除
+                </el-button>
+              </div>
+
+              <div class="payload-foot">
+                <el-button
+                  link
+                  type="primary"
+                  :icon="Plus"
+                  :disabled="!canAddPayloadRow"
+                  @click="addPayloadRow"
+                >
+                  添加属性
+                </el-button>
+                <span class="payload-tip">设备离线时自动挂起、上线后补发（期望状态语义）</span>
+              </div>
+
+              <div v-if="!writableProps.length" class="payload-warn">
+                该产品物模型里没有「可写（readwrite）」属性，无法配置联动下发。
+                请先到「产品 → 物模型」把要控制的属性设为可写。
+              </div>
+              <div v-else class="payload-preview">
+                生成载荷 <code>{{ payloadPreview }}</code>
+              </div>
             </div>
           </el-form-item>
         </template>
@@ -257,7 +303,9 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Refresh } from '@element-plus/icons-vue'
+import { Search, Refresh, Plus } from '@element-plus/icons-vue'
+import PropertyValueInput from '../components/PropertyValueInput.vue'
+import { writableProperties, defaultValueOf } from '../utils/tsl'
 import {
   listRules,
   createRule,
@@ -300,7 +348,8 @@ function blankForm() {
     level: 2,
     alarmType: '规则告警',
     actionType: 0,
-    actionPayload: '',
+    // 下发内容 = 物模型「可写属性 → 值」的多行编辑，不再让用户手写 JSON
+    payloadRows: [{ key: '', value: undefined }],
     cooldownSec: 60,
     enabled: 1
   }
@@ -314,17 +363,60 @@ const currentProduct = computed(() =>
 /** 监测属性下拉：来自该产品的物模型（避免手打 property_key 打错而规则永不命中） */
 const propertyOptions = computed(() => currentProduct.value?.tsl?.properties || [])
 
-/** 联动内容快捷填充：用该产品的「可写 bool 属性」生成，如 switch → {"switch": true/false} */
-const payloadPresets = computed(() => {
-  const out = []
-  for (const p of propertyOptions.value) {
-    if (p.access === 'readwrite' && p.type === 'bool') {
-      out.push({ label: `${p.name || p.key}=false`, payload: JSON.stringify({ [p.key]: false }) })
-      out.push({ label: `${p.name || p.key}=true`, payload: JSON.stringify({ [p.key]: true }) })
-    }
-  }
-  return out
+/**
+ * 联动下发可选属性 = 该产品物模型里的「可写（readwrite）」属性。
+ *
+ * 为什么必须由物模型驱动、而不是让用户手写 JSON：
+ * 下行报文的 `payload` 本来就是「属性名 → 值」的扁平对象
+ * （固件 `device_property_handle(key, value_js)` 按 key 逐个处理，见 firmware/esp32_iot/main/device_dm.c），
+ * 而合法属性名 / 类型 / 取值范围**早就写在 TSL 里了**。让人手写，等于把已经签好的合同再口述一遍 ——
+ * 打错 key 或写错类型，规则会静默地永远不生效。
+ */
+const writableProps = computed(() => writableProperties(currentProduct.value?.tsl))
+
+const propOf = (key) => writableProps.value.find((p) => p.key === key)
+
+/** 本表单已用过的属性 key（同一 payload 重复写同一属性无意义，直接禁选） */
+const dupKeys = computed(
+  () => new Set(form.value.payloadRows.map((r) => r.key).filter(Boolean))
+)
+
+const canAddPayloadRow = computed(
+  () => form.value.payloadRows.length < writableProps.value.length
+)
+
+/** 一行是否已填好（⚠️ bool 的 `false` 是有效值，不能按"假值"丢掉） */
+function rowFilled(r) {
+  if (!r.key) return false
+  if (r.value === undefined || r.value === null) return false
+  return !(typeof r.value === 'string' && r.value.trim() === '')
+}
+
+/** 最终写进 action_payload 的对象 */
+const payloadObject = computed(() => {
+  const o = {}
+  form.value.payloadRows.filter(rowFilled).forEach((r) => { o[r.key] = r.value })
+  return o
 })
+
+const payloadPreview = computed(() => JSON.stringify(payloadObject.value))
+
+/**
+ * 切属性时把值重置为该属性的类型默认。
+ * 不重置的话会带着上一个属性的值 —— 比如把 temperature 的 26.5 填进 bool 的开关。
+ */
+function onPayloadKeyChange(row, key) {
+  row.value = defaultValueOf(propOf(key))
+}
+
+function addPayloadRow() {
+  form.value.payloadRows.push({ key: '', value: undefined })
+}
+
+function removePayloadRow(i) {
+  form.value.payloadRows.splice(i, 1)
+  if (!form.value.payloadRows.length) addPayloadRow()
+}
 
 function levelText(l) {
   return { 1: '严重', 2: '一般', 3: '提示' }[l] || '一般'
@@ -334,8 +426,20 @@ function levelType(l) {
   return { 1: 'danger', 2: 'warning', 3: 'info' }[l] || 'info'
 }
 
-function applyPreset(ps) {
-  form.value.actionPayload = ps.payload
+/** 把库里的 action_payload（JSON 字符串）还原成编辑行 */
+function payloadRowsFrom(json) {
+  const rows = []
+  if (json) {
+    try {
+      const o = JSON.parse(json)
+      if (o && typeof o === 'object' && !Array.isArray(o)) {
+        Object.keys(o).forEach((k) => rows.push({ key: k, value: o[k] }))
+      }
+    } catch {
+      // 历史脏数据（非 JSON 对象）：忽略并落回空行，不阻断编辑
+    }
+  }
+  return rows.length ? rows : [{ key: '', value: undefined }]
 }
 
 // ───────────────────────── 数据加载 ─────────────────────────
@@ -386,11 +490,11 @@ function onPageChange(p) {
 
 // ───────────────────────── 表单 ─────────────────────────
 
-/** 切产品：属性下拉要跟着换，旧的选择必须清掉（否则残留别的产品的 key） */
+/** 切产品：属性下拉与下发内容都要跟着换（旧选择必须清掉，否则残留别的产品的属性 key） */
 async function onProductChange() {
   form.value.propertyKey = ''
   form.value.deviceKey = ''
-  form.value.actionPayload = ''
+  form.value.payloadRows = [{ key: '', value: undefined }]
   deviceOptions.value = []
   if (form.value.scope === 'device') await loadDevices()
 }
@@ -432,7 +536,7 @@ function openEdit(row) {
     level: row.level,
     alarmType: row.alarm_type,
     actionType: row.action_type,
-    actionPayload: row.action_payload || '',
+    payloadRows: payloadRowsFrom(row.action_payload),
     cooldownSec: row.cooldown_sec,
     enabled: row.enabled
   }
@@ -452,7 +556,7 @@ function buildPayload() {
     level: form.value.level,
     alarm_type: form.value.alarmType,
     action_type: form.value.actionType,
-    action_payload: form.value.actionType === 1 ? form.value.actionPayload : null,
+    action_payload: form.value.actionType === 1 ? JSON.stringify(payloadObject.value) : null,
     cooldown_sec: form.value.cooldownSec,
     enabled: form.value.enabled
   }
@@ -466,16 +570,12 @@ function validate() {
   if (!form.value.propertyKey) return '请选择监测属性'
   if (form.value.threshold === null || form.value.threshold === undefined) return '请填写阈值'
   if (form.value.actionType === 1) {
-    const txt = (form.value.actionPayload || '').trim()
-    if (!txt) return '选择「告警并下发指令」时必须填写下发内容'
-    try {
-      const parsed = JSON.parse(txt)
-      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-        return '下发内容必须是 JSON 对象，如 {"switch": false}'
-      }
-    } catch {
-      return '下发内容不是合法 JSON'
-    }
+    const rows = form.value.payloadRows.filter(rowFilled)
+    if (!rows.length) return '选择「告警并下发指令」时，至少要配一个要下发的属性'
+    const keys = form.value.payloadRows.filter((r) => r.key).map((r) => r.key)
+    if (new Set(keys).size !== keys.length) return '同一个属性不能重复配置'
+    const missing = form.value.payloadRows.find((r) => r.key && !rowFilled(r))
+    if (missing) return `属性「${missing.key}」还没填值`
   }
   return ''
 }
@@ -720,11 +820,65 @@ onMounted(async () => {
   width: 140px;
 }
 
-.payload-tip {
-  margin-top: 6px;
+/* ─── 联动下发内容：TSL 驱动的属性行编辑 ─── */
+.payload-editor {
+  width: 100%;
+}
+
+.payload-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.pr-prop {
+  flex: 1;
+  min-width: 0;
+}
+
+.pr-empty {
+  width: 150px;
   font-size: 12px;
-  color: #9ca3af;
-  line-height: 1.8;
+  color: #b0b8c4;
+}
+
+.payload-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.payload-tip {
+  font-size: 11px;
+  color: #b0b8c4;
+}
+
+/* 物模型没有可写属性时的硬提示：这不是"用户没填"，而是配置前提不成立 */
+.payload-warn {
+  margin-top: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #854f0b;
+  background: #faeeda;
+  border-radius: 6px;
+}
+
+.payload-preview {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.payload-preview code {
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  color: #1f2937;
+  background: #f1f5f9;
+  padding: 2px 6px;
+  border-radius: 4px;
 }
 
 .unit-tip {

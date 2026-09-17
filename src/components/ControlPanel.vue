@@ -41,40 +41,13 @@
               <small>{{ p.key }} · {{ p.type }}</small>
             </div>
             <div class="cp-widget">
-              <el-switch v-if="p.type === 'bool'" v-model="draft[p.key]" />
-
-              <el-select
-                v-else-if="p.type === 'enum'"
-                v-model="draft[p.key]"
-                size="small"
-                style="width: 160px"
-                placeholder="选择枚举值"
-              >
-                <el-option
-                  v-for="o in p.elements || []"
-                  :key="String(o.value)"
-                  :value="o.value"
-                  :label="o.key"
-                />
-              </el-select>
-
-              <el-input-number
-                v-else-if="p.type === 'int' || p.type === 'float'"
-                v-model="draft[p.key]"
-                size="small"
-                :min="p.min ?? undefined"
-                :max="p.max ?? undefined"
-                :step="stepOf(p)"
-                controls-position="right"
-                style="width: 140px"
-              />
-
-              <el-input
-                v-else
-                v-model="draft[p.key]"
-                size="small"
-                style="width: 160px"
-                placeholder="输入值"
+              <!-- 属性值控件已抽成共享件 PropertyValueInput：与「告警规则·联动下发」共用
+                   同一套 TSL → 控件映射，避免同一属性在两处长成两个样 -->
+              <PropertyValueInput
+                :prop="p"
+                :model-value="draft[p.key]"
+                width="150px"
+                @update:model-value="(v) => (draft[p.key] = v)"
               />
             </div>
             <span class="cp-cur">当前 {{ curText(p) }}</span>
@@ -136,7 +109,7 @@
             v-else-if="p.type === 'int' || p.type === 'float'"
             v-model="svcValues[p.key]"
             size="small"
-            :step="p.type === 'int' ? 1 : 0.1"
+            :step="stepOf(p)"
             controls-position="right"
             style="width: 180px"
           />
@@ -163,6 +136,8 @@
 import { ref, reactive, computed, watch, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import { dispatchCommand, getCommandStatus } from '../api'
+import PropertyValueInput from './PropertyValueInput.vue'
+import { stepOf, isTruthy, defaultValueOf } from '../utils/tsl'
 
 const props = defineProps({
   deviceKey: { type: String, required: true },
@@ -218,12 +193,7 @@ const statusClass = computed(() =>
   lastCommand.value ? STATUS_MAP[lastCommand.value.status]?.cls || '' : ''
 )
 
-/** 步长：物模型未配则按类型给默认（int 1 / float 0.1） */
-const stepOf = (prop) => prop.step ?? (prop.type === 'int' ? 1 : 0.1)
-
-function isTruthy(v) {
-  return v === true || v === 'true' || v === 1 || v === '1'
-}
+/** 步长 / isTruthy / 类型默认值 均来自 utils/tsl，与告警规则页共享同一套映射 */
 
 /** 草稿初始值：以设备当前上报值为准，无值则退回类型默认 */
 function initDraft(p) {
@@ -231,9 +201,9 @@ function initDraft(p) {
   if (p.type === 'bool') return isTruthy(cur)
   if (p.type === 'int' || p.type === 'float') {
     const n = Number(cur)
-    return Number.isNaN(n) ? p.min ?? 0 : n
+    return Number.isNaN(n) ? defaultValueOf(p) : n
   }
-  if (p.type === 'enum') return cur ?? (p.elements || [])[0]?.value ?? ''
+  if (p.type === 'enum') return cur ?? defaultValueOf(p)
   return cur === undefined || cur === null ? '' : String(cur)
 }
 
