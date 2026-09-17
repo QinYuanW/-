@@ -66,6 +66,11 @@ services:
     volumes:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      # ⚠️ 必须挂 /var/lib/grafana：否则容器被 recreate（docker compose up 触发重建）后，
+      # Grafana 的 sqlite（grafana.db：改过的密码 / 手建大盘 / 告警静默）全部归零、
+      # 静默退回 admin/admin。而 provisioning 与 dashboards 是 ro 挂载、每次重灌，
+      # 大盘照样打得开 —— 极易误判成"数据没丢"。
+      - grafana_data:/var/lib/grafana
     depends_on:
       - prometheus
 
@@ -113,3 +118,4 @@ volumes:
   emqx_log:
   redis_data:
   kafka_data:
+  grafana_data:
