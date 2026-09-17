@@ -972,6 +972,7 @@
 - `operator` 必须在 `> >= < <= == !=` 内；`level` ∈ 1/2/3；`action_type` ∈ 0/1；`cooldown_sec` ≥ 0；
 - `action_payload`：`action_type=1` 时**必填且必须是 JSON 对象**（数组/裸值/非法 JSON 都拒）；`action_type=0` 时强制置 `NULL`。
   > ⚠️ `action_payload` 是 MySQL **JSON 列**：空串不是合法 JSON（MySQL 报 `3140 Invalid JSON text`），必须落 `NULL`。
+  > **控制台侧不暴露这个 JSON**：下发内容由「物模型可写属性 → 值」行编辑生成（`PropertyValueInput` 按 TSL 的 `type` 渲染控件）。下行的 `payload` 本就是属性扁平赋值（固件 `device_property_handle(key, value_js)` 按 key 逐个处理），合法属性名 / 类型 / 取值范围早写在 TSL 里 —— 让用户手写 JSON 只会把已经签好的合同再口述一遍，打错 key 或写错类型会让规则静默地永不生效。
 
 ### 12.4 PUT `/api/v1/rules/{id}` — 编辑（全字段覆盖）
 
@@ -1003,7 +1004,8 @@ body `{"enabled": 0|1}`。
 | 5 | ⭐ 冷却失效 | 编辑后 `rule:cd:*` 键数 **0**；立刻再报，告警数 **1 → 2** |
 | 6 | 启停 | `enabled` 落库 0/1 正确 |
 | 7 | 逻辑删 | `deleted=1`；列表与详情均查不到；`total` 回到 2 |
-| 8 | 前端浏览器冒烟 | 渲染 2 行、**属性下拉由该产品物模型 TSL 填充**、联动「快捷填充」出现 `开关=false / 开关=true`、编辑弹窗回填条件、开关触发 `PUT /rules/2/status`、**运行时错误 0** |
+| 8 | 前端浏览器冒烟 | 渲染 2 行、**属性下拉由该产品物模型 TSL 填充**、编辑弹窗回填条件、开关触发 `PUT /rules/2/status`、**运行时错误 0** |
+| 9 | 联动下发内容编辑器（2026-09-17 改版） | 可选项**只列出物模型可写属性**（`switch` / `dqy`；readonly 的 temperature / humidity / co2 不出现）；bool→开关、float→数字控件；两属性载荷 `{"switch":false,"dqy":0}`；**编辑既有规则能反向还原成属性行**（`{"switch": false}` → 1 行、开关为关）；已用属性在下拉里 `is-disabled=true`（DOM 实测）；**运行时错误 0** |
 
 ---
 
