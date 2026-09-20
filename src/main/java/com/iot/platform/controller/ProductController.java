@@ -69,4 +69,27 @@ public class ProductController {
                                                  @RequestBody Map<String, Object> tsl) {
         return Result.ok(productService.updateTsl(productKey, tsl));
     }
+
+    /** 评审 6.1：改产品名称（body {@code {"name": "..."}}）—— 纯展示变更，不动链路 */
+    @PutMapping("/products/{productKey}")
+    public Result<ProductVO> rename(@PathVariable String productKey,
+                                    @RequestBody Map<String, Object> body) {
+        Object name = body.get("name");
+        if (name == null || String.valueOf(name).isBlank()) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "缺少 name");
+        }
+        return Result.ok(productService.renameProduct(productKey, String.valueOf(name)));
+    }
+
+    /**
+     * 评审 6.1：删除产品。
+     *
+     * <p>名下还有设备时会被拒绝（见 {@link ProductService#deleteProduct}）——
+     * 这不是"多此一举的确认"，而是防止把设备指向一个不存在的产品、且再也救不回来。
+     */
+    @DeleteMapping("/products/{productKey}")
+    public Result<Void> delete(@PathVariable String productKey) {
+        productService.deleteProduct(productKey);
+        return Result.ok();
+    }
 }

@@ -74,11 +74,10 @@ public class DeviceServiceImpl implements DeviceService {
 
     @Override
     public Page<DeviceVO> listDevices(int page, int size, String keyword, String productKey,
-                                      Integer onlineStatus, Long groupId) {
+                                      Integer onlineStatus, Long groupId, String sort, String order) {
         Page<Device> devicePage = new Page<>(page, size);
-        LambdaQueryWrapper<Device> wrapper = new LambdaQueryWrapper<Device>()
-                .orderByDesc(Device::getOnlineStatus)
-                .orderByDesc(Device::getLastOnlineAt);
+        LambdaQueryWrapper<Device> wrapper = new LambdaQueryWrapper<>();
+        applySort(wrapper, sort, order);
         if (keyword != null && !keyword.isBlank()) {
             wrapper.and(w -> w.like(Device::getDeviceKey, keyword)
                     .or().like(Device::getDeviceName, keyword));
@@ -106,6 +105,59 @@ public class DeviceServiceImpl implements DeviceService {
         voPage.setRecords(devicePage.getRecords().stream().map(DeviceVO::from).collect(Collectors.toList()));
         fillProductEnabled(voPage.getRecords());
         return voPage;
+    }
+
+    /**
+     * 排序（评审 4.2）。
+     *
+     * <p>默认保持原行为「在线优先 + 最近活跃在前」—— 打开列表第一眼想知道的是"谁在线"。
+     * 但用户一旦显式指定排序，就**完全按他说的来**，不再偷偷加"在线优先"：
+     * 选了"按名称排"却混进一个优先级维度，结果看起来就是乱序。
+     *
+     * <p>用 switch 映射到 lambda 列而不是拼接列名 —— 排序字段是典型的 SQL 注入入口
+     * （ORDER BY 无法用参数占位符），这里连拼接的机会都不给。
+     *
+     * <p>末尾统一按 id 兜底：字段有重复值时（如批量注册出来的同名设备）没有稳定次序，
+     * 翻页会出现"同一台在第二页又出现一次"的经典错乱。
+     */
+    private void applySort(LambdaQueryWrapper<Device> wrapper, String sort, String order) {
+        boolean asc = "asc".equalsIgnoreCase(order);
+        if (sort == null || sort.isBlank()) {
+            wrapper.orderByDesc(Device::getOnlineStatus).orderByDesc(Device::getLastOnlineAt);
+            return;
+        }
+        switch (sort) {
+            case "device_key" -> wrapper.orderBy(true, asc, Device::getDeviceKey);
+            case "device_name" -> wrapper.orderBy(true, asc, Device::getDeviceName);
+            case "created_at" -> wrapper.orderBy(true, asc, Device::getCreatedAt);
+            case "last_online_at" -> wrapper.orderBy(true, asc, Device::getLastOnlineAt);
+            default -> wrapper.orderByDesc(Device::getOnlineStatus).orderByDesc(Device::getLastOnlineAt);
+        }
+        wrapper.orderByDesc(Device::getId);
+    }
+
+    @Override
+    public boolean renameDevice(String deviceKey, String deviceName) {
+        if (deviceName == null || deviceName.isBlank()) {
+            return false;
+        }
+        Device device = deviceMapper.selectOne(
+                new LambdaQueryWrapper<Device>().eq(Device::getDeviceKey, deviceKey));
+        if (device == null) {
+            throw new BizException(ErrorCode.DEVICE_NOT_FOUND, "设备不存在：" + deviceKey);
+        }
+        String next = deviceName.trim();
+        if (next.equals(device.getDeviceName())) {
+            return false; // 没变就不写库、也不记日志
+        }
+        String before = device.getDeviceName();
+        deviceMapper.update(null, new LambdaUpdateWrapper<Device>()
+                .set(Device::getDeviceName, next)
+                .set(Device::getUpdatedAt, LocalDateTime.now())
+                .eq(Device::getId, device.getId()));
+        // 记操作日志，让"谁在什么时候改的名"可追溯（详情页「操作日志」tab 会显示）
+        insertLog(device.getId(), 3, "重命名：" + (before == null ? "(空)" : before) + " → " + next);
+        return true;
     }
 
     /**
@@ -207,14 +259,46 @@ public class DeviceServiceImpl implements DeviceService {
         Device device = deviceMapper.selectOne(
                 new LambdaQueryWrapper<Device>().eq(Device::getDeviceKey, deviceKey));
         if (device == null) {
-            return Collections.emptyMap();
+            return Map.of("ts", 0L, "properties", Collections.emptyMap());
         }
-        // 每个属性一行（property_key, value），转成 {key: value} 结构
+        // 每个属性一行（property_key, value, ts），转成 {ts, properties:{key: value}}
+        //
+        // 评审 5.3：响应体从「裸属性表」改成 {ts, properties} —— 前端只看到 26.5℃ 无法判断
+        // 新鲜度（可能是刚上报的，也可能是几小时前的）。ts 取各属性里最新的那条，
+        // 类型用 epoch 毫秒，与上报报文 / WS 推送里的 ts 保持一致（同名同类型）。
+        Map<String, Object> properties = new LinkedHashMap<>();
+        long maxTs = 0L;
+        for (Map<String, Object> row : telemetryMapper.selectLatestByDevice(device.getId())) {
+            properties.put(String.valueOf(row.get("property_key")), row.get("value"));
+            maxTs = Math.max(maxTs, toEpochMilli(row.get("ts")));
+        }
         Map<String, Object> result = new LinkedHashMap<>();
-        for (Map<String, String> row : telemetryMapper.selectLatestByDevice(device.getId())) {
-            result.put(row.get("property_key"), row.get("value"));
-        }
+        result.put("ts", maxTs);
+        result.put("properties", properties);
         return result;
+    }
+
+    /**
+     * 把 JDBC 取回的时间值统一转成 epoch 毫秒。
+     *
+     * <p>为什么不直接在 SQL 里 `UNIX_TIMESTAMP(ts)*1000`：那会把结果绑到会话时区上，
+     * 换个连接时区就静默偏移；在 Java 侧按 {@code systemDefault} 转换与写入路径同一口径。
+     * 类型分支是为了对 MyBatis 可能给出的几种形态都稳（Timestamp / LocalDateTime / 数值）。
+     */
+    private static long toEpochMilli(Object ts) {
+        if (ts == null) {
+            return 0L;
+        }
+        if (ts instanceof java.sql.Timestamp t) {
+            return t.getTime();
+        }
+        if (ts instanceof LocalDateTime ldt) {
+            return ldt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        }
+        if (ts instanceof Number n) {
+            return n.longValue();
+        }
+        return 0L;
     }
 
     @Override

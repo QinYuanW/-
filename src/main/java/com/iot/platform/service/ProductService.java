@@ -44,4 +44,24 @@ public interface ProductService {
      * <p>变更后立即失效产品状态缓存（认证回调 TTL 5min），让停用不用等缓存过期。
      */
     void updateStatus(String productKey, int status);
+
+    /**
+     * 评审 6.1：修改产品名称。
+     *
+     * <p>只改 name —— 物模型走 {@link #updateTsl}，启停走 {@link #updateStatus}。
+     * 改名是纯展示变更，不影响任何链路，也不需要失效认证缓存。
+     */
+    ProductVO renameProduct(String productKey, String name);
+
+    /**
+     * 评审 6.1：删除产品。
+     *
+     * <p><b>护栏</b>：名下还有未删除设备时**拒绝删除** —— 否则那些设备会指向一个不存在的产品，
+     * 认证（级联判断读产品状态）、物模型解析、产品级联停用全部失效，而界面上没有任何入口
+     * 能把它们救回来。正确的顺序是先把设备删掉或迁到别的产品。
+     *
+     * <p>逻辑删除（{@code deleted=1}），数据仍在库里可人工恢复；删除后立即失效产品启用缓存，
+     * 避免该 key 在 TTL 内仍被判为"启用"。
+     */
+    void deleteProduct(String productKey);
 }

@@ -13,11 +13,19 @@ import java.util.Map;
 @Mapper
 public interface DeviceTelemetryMapper extends BaseMapper<DeviceTelemetry> {
 
-    @Select("SELECT t.property_key, t.value FROM device_telemetry t " +
+    /**
+     * 每属性最新一条（评审 5.3：补 `t.ts`）。
+     *
+     * <p>为什么必须带上 ts：前端只拿到「26.5℃」无法判断新鲜度 —— 可能是刚上报的，
+     * 也可能是几小时前的。带上时间戳，卡片才能显示「数据时间」。
+     *
+     * <p>返回 `Map<String,Object>`（而非 String）：ts 是 DATETIME，值类型不是字符串。
+     */
+    @Select("SELECT t.property_key, t.value, t.ts FROM device_telemetry t " +
             "INNER JOIN (SELECT property_key, MAX(ts) AS max_ts FROM device_telemetry " +
             "WHERE device_id = #{deviceId} GROUP BY property_key) latest " +
             "ON t.device_id = #{deviceId} AND t.property_key = latest.property_key AND t.ts = latest.max_ts")
-    List<Map<String, String>> selectLatestByDevice(Long deviceId);
+    List<Map<String, Object>> selectLatestByDevice(Long deviceId);
 
     /**
      * 批量幂等插入：一条 multi-values INSERT 代替逐条，显著降低写路径往返次数（BUG-17 §3.2）。

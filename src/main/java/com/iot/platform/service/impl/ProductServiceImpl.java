@@ -266,6 +266,48 @@ public class ProductServiceImpl implements ProductService {
                 status == 1 ? "（启用）" : "（停用：该产品下所有设备将无法接入）");
     }
 
+    @Override
+    public ProductVO renameProduct(String productKey, String name) {
+        if (name == null || name.isBlank()) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "缺少产品名称");
+        }
+        Product exist = productMapper.selectOne(
+                new LambdaQueryWrapper<Product>().eq(Product::getProductKey, productKey));
+        if (exist == null) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "产品不存在: " + productKey);
+        }
+        productMapper.update(null, new LambdaUpdateWrapper<Product>()
+                .eq(Product::getProductKey, productKey)
+                .set(Product::getName, name.trim())
+                .set(Product::getUpdatedAt, LocalDateTime.now()));
+        log.info("产品[{}] 改名：{} → {}", productKey, exist.getName(), name.trim());
+        return ProductVO.from(productMapper.selectOne(
+                new LambdaQueryWrapper<Product>().eq(Product::getProductKey, productKey)), objectMapper);
+    }
+
+    @Override
+    public void deleteProduct(String productKey) {
+        Product exist = productMapper.selectOne(
+                new LambdaQueryWrapper<Product>().eq(Product::getProductKey, productKey));
+        if (exist == null) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "产品不存在: " + productKey);
+        }
+        // 护栏：名下还有设备就拒绝删除。否则那些设备会指向一个不存在的产品 ——
+        // 认证（级联判断读产品状态）、物模型解析、产品级联停用全部失效，
+        // 而界面上没有任何入口能把它们救回来。正确顺序是先删设备或把它们迁到别的产品。
+        // （Device 带 @TableLogic，这里的 count 自动只算未删除的）
+        Long alive = deviceMapper.selectCount(
+                new LambdaQueryWrapper<Device>().eq(Device::getProductKey, productKey));
+        if (alive != null && alive > 0) {
+            throw new BizException(ErrorCode.PARAM_ERROR,
+                    "该产品下还有 " + alive + " 台设备，不能删除；请先删除这些设备或把它们迁到其它产品");
+        }
+        productMapper.delete(new LambdaQueryWrapper<Product>().eq(Product::getProductKey, productKey));
+        // 清产品启用缓存：否则该 key 在 TTL 内仍会被判成"启用"
+        authService.evictProductCache(productKey);
+        log.info("产品[{}] 已删除（逻辑删除，库里数据仍在）", productKey);
+    }
+
     private int countOf(Object list) {
         return list instanceof List ? ((List<?>) list).size() : 0;
     }

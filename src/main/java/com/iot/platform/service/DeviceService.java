@@ -17,10 +17,27 @@ public interface DeviceService {
      * @param keyword 搜索关键词
      * @param productKey 产品标识筛选；null/空白 = 不过滤（E5）
      * @param onlineStatus 在线状态筛选：null/0 不过滤，1 在线，2 离线（3.3 列表增强）
+     * @param groupId 分组筛选：null 不过滤，0 = 未分组，&gt;0 = 指定分组（E4）
+     * @param sort 排序字段（评审 4.2）：{@code last_online_at}（默认）/ {@code device_key} /
+     *             {@code device_name} / {@code created_at}；**白名单外一律回退默认**，
+     *             不把用户输入直接拼进 SQL
+     * @param order 排序方向 {@code asc} / {@code desc}；缺省按字段选一个合理的默认
      * @return 设备列表
      */
     Page<DeviceVO> listDevices(int page, int size, String keyword, String productKey,
-                               Integer onlineStatus, Long groupId);
+                               Integer onlineStatus, Long groupId, String sort, String order);
+
+    /**
+     * 修改设备名称（评审 4.8）。
+     *
+     * <p>只改名称 —— 启停用 {@link #updateStatus}（保留全部数据、可一键恢复），
+     * 删除用 {@link #deleteDevices}（不可逆），三者语义不同，不要混在一个入口里。
+     *
+     * @param deviceKey 设备标识
+     * @param deviceName 新名称（去首尾空白；空白视为不改）
+     * @return 是否实际更新
+     */
+    boolean renameDevice(String deviceKey, String deviceName);
 
     /**
      * 批量删除设备（级联清理遥测/日志/指令/影子，3.3 列表增强）

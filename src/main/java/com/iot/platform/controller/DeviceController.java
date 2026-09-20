@@ -36,9 +36,29 @@ public class DeviceController {
                                             @RequestParam(required = false) String keyword,
                                             @RequestParam(name = "product_key", required = false) String productKey,
                                             @RequestParam(name = "online_status", required = false) Integer onlineStatus,
-                                            @RequestParam(name = "group_id", required = false) Long groupId) {
-        Page<DeviceVO> result = deviceService.listDevices(page, size, keyword, productKey, onlineStatus, groupId);
+                                            @RequestParam(name = "group_id", required = false) Long groupId,
+                                            @RequestParam(required = false) String sort,
+                                            @RequestParam(required = false) String order) {
+        Page<DeviceVO> result = deviceService.listDevices(
+                page, size, keyword, productKey, onlineStatus, groupId, sort, order);
         return Result.ok(Map.of("total", result.getTotal(), "items", result.getRecords()));
+    }
+
+    /**
+     * 评审 4.8：修改设备名称（body {@code {"device_name": "..."}}）。
+     *
+     * <p>与启停（{@link #updateStatus}）、删除（{@link #deleteBatch}）语义分立：
+     * 改名是纯标识变更，不影响链路；启停保留数据可恢复；删除不可逆。
+     */
+    @PutMapping("/devices/{deviceKey}")
+    public Result<Map<String, Object>> rename(@PathVariable String deviceKey,
+                                              @RequestBody Map<String, Object> body) {
+        Object name = body.get("device_name");
+        if (name == null || String.valueOf(name).isBlank()) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "缺少 device_name");
+        }
+        boolean updated = deviceService.renameDevice(deviceKey, String.valueOf(name));
+        return Result.ok(Map.of("updated", updated));
     }
 
     /**
