@@ -4,6 +4,17 @@
       <div class="console-title">
         <span>设备控制台</span>
         <el-tag size="small" type="info" effect="plain">{{ total }} 台</el-tag>
+        <!-- 4.5：把"数据是不是活的"显式说出来 —— 绿点=WS 已连（上下线实时），
+             灰点=推送断开、已退回 60s 轮询兜底。没有这个指示，用户无法分辨
+             "设备一直离线"和"推送挂了" -->
+        <el-tooltip
+          :content="realtime ? '实时推送已连接：设备上下线会立即反映到列表' : '推送未连接：已退回 60 秒轮询兜底'"
+          placement="top"
+        >
+          <span class="rt-dot" :class="realtime ? 'on' : 'off'">
+            <i></i>{{ realtime ? '实时' : '轮询' }}
+          </span>
+        </el-tooltip>
       </div>
     </div>
 
@@ -186,6 +197,7 @@ import {
   updateDeviceStatus
 } from '../api'
 import { downloadCsv, formatTime } from '../utils/export'
+import { createTelemetrySocket } from '../api/ws'
 import DeviceCards from '../components/DeviceCards.vue'
 import DeviceList from '../components/DeviceList.vue'
 import DeviceRegister from '../components/DeviceRegister.vue'
@@ -235,8 +247,11 @@ const batchListRef = ref()
 
 const EXPORT_LIMIT = 5000
 
-async function loadDevices() {
-  loading.value = true
+async function loadDevices(opts) {
+  // 注意用 opts?.silent 而不是解构默认值：模板里 @registered="loadDevices" 会把事件载荷
+  // 当作第一个参数传进来，解构非对象参数会直接抛错
+  const silent = !!(opts && opts.silent)
+  if (!silent) loading.value = true
   try {
     const res = await listDevices(
       page.value,
@@ -251,9 +266,84 @@ async function loadDevices() {
   } catch (e) {
     devices.value = []
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
     loadBreakdown() // 不 await：列表先渲染，统计随后补上
   }
+}
+
+// ===== 4.5 实时推送（E2 早已落地，此前只接了设备详情页）=====
+// 列表页原来只在进入时拉一次：设备上下线不会反映到列表（评审 4.5）。
+// 这里接 WS —— telemetry / status 两种报文都能把在线状态落到当前页的行上；
+// WS 断开自动退回 60s 静默轮询，避免"推送一挂页面就死"。
+const realtime = ref(false) // WS 是否已连接（头部绿点/灰点就是它）
+let socket = null
+let fallbackTimer = null
+const FALLBACK_POLL_MS = 60000
+
+/** 本地时间格式化：telemetry 的 ts 是 epoch 毫秒，而 utils/formatTime 只认 ISO 字符串 */
+function fmtLocal(ms) {
+  const d = new Date(Number(ms))
+  if (Number.isNaN(d.getTime())) return ''
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} `
+    + `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
+/**
+ * 把一条实时状态变更应用到列表与统计卡。
+ *
+ * 只处理**当前页可见的行** —— 它必然属于当前筛选结果集，所以统计可以精确 ±1。
+ * 不在当前页的设备不去猜它属于哪些筛选（报文里没有 product/group 信息），
+ * **保守不动统计**：下次刷新会纠正，好过在这里算出一个错的数。
+ */
+function applyStatusChange(deviceKey, onlineStatus, at) {
+  const row = devices.value.find((d) => d.device_key === deviceKey)
+  if (!row) return
+  const wasOnline = row.online_status === 1
+  const nowOnline = onlineStatus === 1
+  row.online_status = nowOnline ? 1 : 0
+  if (at) row.last_online_at = at
+  if (wasOnline === nowOnline) return
+
+  const b = breakdown.value
+  if (b.online === null || b.offline === null) return
+  breakdown.value = {
+    online: b.online + (nowOnline ? 1 : -1),
+    offline: b.offline + (nowOnline ? -1 : 1)
+  }
+}
+
+function startRealtime() {
+  socket = createTelemetrySocket({
+    // 不传 device_key = 订阅全部设备
+    onOpen: () => { realtime.value = true; stopFallbackPolling() },
+    onClose: () => { realtime.value = false; startFallbackPolling() },
+    onMessage: (msg) => {
+      if (msg.type === 'telemetry') {
+        // 「收到上报即视为在线」—— 与后端 refreshOnline 的语义保持一致
+        applyStatusChange(msg.device_key, 1, msg.ts ? fmtLocal(msg.ts) : '')
+      } else if (msg.type === 'status') {
+        applyStatusChange(msg.device_key, msg.online_status, msg.at || '')
+      }
+    }
+  })
+}
+
+function stopRealtime() {
+  if (socket) socket.close()
+  socket = null
+  stopFallbackPolling()
+}
+
+/** WS 断开时的兜底：静默轮询，保证"推送挂了列表也不会僵住" */
+function startFallbackPolling() {
+  if (fallbackTimer) return
+  fallbackTimer = setInterval(() => loadDevices({ silent: true }), FALLBACK_POLL_MS)
+}
+
+function stopFallbackPolling() {
+  if (fallbackTimer) clearInterval(fallbackTimer)
+  fallbackTimer = null
 }
 
 async function loadGroups() {
@@ -511,6 +601,9 @@ onMounted(() => {
   loadDevices()
   loadProducts()
   loadGroups()
+  // 4.5：先起兜底轮询（万一 WS 一直连不上），WS 一旦 onopen 就会把它停掉
+  startRealtime()
+  startFallbackPolling()
 })
 
 /**
@@ -539,7 +632,10 @@ function syncQuery() {
 // 筛选一变就同步 URL（筛选控件分散在模板各处，用 watch 比逐个改 @change handler 更不容易漏）
 watch([statusFilter, productKey, keyword, groupFilter], syncQuery)
 
-onBeforeUnmount(() => clearTimeout(searchTimer))
+onBeforeUnmount(() => {
+  clearTimeout(searchTimer)
+  stopRealtime()
+})
 </script>
 
 <style scoped>
@@ -577,6 +673,37 @@ onBeforeUnmount(() => clearTimeout(searchTimer))
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* 4.5：实时/轮询指示点 —— 让"数据是不是活的"可见。
+   没有它，用户分不清"设备一直离线"和"推送挂了" */
+.rt-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 400;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: #f1f5f9;
+  color: #64748b;
+  cursor: default;
+}
+
+.rt-dot i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #94a3b8;
+}
+
+.rt-dot.on {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.rt-dot.on i {
+  background: #10b981;
 }
 
 .stats-bar {
