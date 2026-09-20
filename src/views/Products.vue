@@ -70,6 +70,11 @@
             >
               {{ p.status === 0 ? '启用' : '停用' }}
             </button>
+            <!-- 6.1：改名原先没有入口（名字写错只能改库）；删除原先也没有 -->
+            <i class="divider"></i>
+            <button class="action" @click.stop="openRename(p)">重命名</button>
+            <i class="divider"></i>
+            <button class="action danger" @click.stop="askDelete(p)">删除</button>
           </div>
         </div>
         <el-empty v-if="!loading && !filteredProducts.length" description="暂无产品" :image-size="80" class="cards-empty" />
@@ -91,6 +96,24 @@
         <el-button type="primary" :loading="creating" @click="doCreate">创建</el-button>
       </template>
     </el-dialog>
+    <!-- 6.1：重命名产品 -->
+    <el-dialog v-model="renameVisible" title="重命名产品" width="440px">
+      <div class="rename-tip">
+        product_key <span class="mono">{{ renameForm.product_key }}</span> 不可更改 ——
+        它会进入 MQTT 主题与影子 field，改了会切断已有设备的接入。
+      </div>
+      <el-input
+        v-model="renameForm.name"
+        placeholder="请输入新的产品名称"
+        maxlength="64"
+        show-word-limit
+        @keyup.enter="doRename"
+      />
+      <template #footer>
+        <el-button @click="renameVisible = false">取消</el-button>
+        <el-button type="primary" :loading="renaming" @click="doRename">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -99,13 +122,25 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search, Goods } from '@element-plus/icons-vue'
-import { listProducts, createProduct, updateProductStatus, listDevices } from '../api'
+import {
+  listProducts,
+  createProduct,
+  updateProductStatus,
+  renameProduct,
+  deleteProduct,
+  listDevices
+} from '../api'
 import { formatTime } from '../utils/export'
 
 const router = useRouter()
 
 const products = ref([])
 const loading = ref(false)
+
+// 6.1：重命名弹窗
+const renameVisible = ref(false)
+const renaming = ref(false)
+const renameForm = reactive({ product_key: '', name: '' })
 const productSearch = ref('')
 
 const createVisible = ref(false)
@@ -184,6 +219,73 @@ async function toggleStatus(p) {
     await updateProductStatus(p.product_key, isDisable ? 0 : 1)
     ElMessage.success(isDisable ? '已停用' : '已启用')
     await load()
+  } catch (e) {
+    // 拦截器已提示
+  }
+}
+
+// ===== 6.1 重命名 / 删除 =====
+
+async function openRename(p) {
+  renameForm.product_key = p.product_key
+  renameForm.name = p.name || ''
+  renameVisible.value = true
+}
+
+async function doRename() {
+  const name = renameForm.name.trim()
+  if (!name) {
+    ElMessage.warning('产品名称不能为空')
+    return
+  }
+  renaming.value = true
+  try {
+    await renameProduct(renameForm.product_key, name)
+    ElMessage.success('名称已更新')
+    renameVisible.value = false
+    load()
+  } catch (e) {
+    // 拦截器已提示
+  } finally {
+    renaming.value = false
+  }
+}
+
+/**
+ * 删除产品。
+ *
+ * 后端有护栏「名下还有设备就拒绝删除」—— 这里先把设备数查出来告诉用户，
+ * 而不是等他点下去才吃一个报错：**能提前讲清后果的，就别让用户去撞**。
+ */
+async function askDelete(p) {
+  let count = 0
+  try {
+    const res = await listDevices(1, 1, '', p.product_key, 0, null)
+    count = res.data?.total || 0
+  } catch {
+    // 查不到就按未知处理，交给后端护栏兜底
+  }
+  if (count > 0) {
+    ElMessageBox.alert(
+      `该产品下还有 ${count} 台设备，不能删除。请先删除这些设备，或把它们迁到其它产品。`,
+      '无法删除',
+      { type: 'warning', confirmButtonText: '知道了' }
+    )
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定删除产品「${p.name}」吗？\n物模型与配置会一并移除（逻辑删除，数据仍在库中）。`,
+      '删除产品',
+      { type: 'warning', confirmButtonText: '删除', confirmButtonClass: 'el-button--danger' }
+    )
+  } catch {
+    return
+  }
+  try {
+    await deleteProduct(p.product_key)
+    ElMessage.success('产品已删除')
+    load()
   } catch (e) {
     // 拦截器已提示
   }
@@ -431,6 +533,30 @@ onMounted(load)
 
 .action.warn:hover {
   color: #b91c1c;
+}
+
+/* 6.1：删除是**不可逆**动作，用危险色与「停用」（可一键恢复）区分开 ——
+   这两个动作后果完全不同，长得一样会误导。 */
+.action.danger {
+  color: #dc2626;
+}
+
+.action.danger:hover {
+  color: #b91c1c;
+  background: #fef2f2;
+}
+
+/* 6.1：重命名弹窗里的说明 */
+.rename-tip {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.7;
+  margin-bottom: 10px;
+}
+
+.rename-tip .mono {
+  font-family: Consolas, monospace;
+  color: #1f2937;
 }
 
 .divider {

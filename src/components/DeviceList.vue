@@ -7,15 +7,20 @@
         v-loading="loading"
         size="default"
         class="dev-table"
+        :default-sort="defaultSort"
         @selection-change="handleSelectionChange"
+        @sort-change="(e) => emit('sort-change', e)"
       >
         <el-table-column type="selection" width="44" :selectable="() => true" />
-        <el-table-column label="设备名称" min-width="140" show-overflow-tooltip>
+        <!-- 4.2：排序交给后端做（sortable="custom" 表示"我会自己排，你别在前端排"）——
+             前端排序只能排当前这一页 20 条，而这里一共 1000+ 台、共 50 多页，
+             那样排出来的结果是错的（看着像"最小的在最后"）。 -->
+        <el-table-column prop="device_name" label="设备名称" min-width="140" show-overflow-tooltip sortable="custom">
           <template #default="{ row }">
             <a class="dev-name-link" @click="$emit('select', row)">{{ row.device_name || row.device_key }}</a>
           </template>
         </el-table-column>
-        <el-table-column prop="device_key" label="device_key" min-width="160" show-overflow-tooltip>
+        <el-table-column prop="device_key" label="device_key" min-width="160" show-overflow-tooltip sortable="custom">
           <template #default="{ row }">
             <span class="mono">{{ row.device_key }}</span>
           </template>
@@ -41,12 +46,14 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="最后在线时间" min-width="160">
+        <el-table-column prop="last_online_at" label="最后在线时间" min-width="160" sortable="custom">
           <template #default="{ row }">{{ formatTime(row.last_online_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="80" fixed="right">
+        <el-table-column label="操作" width="140" fixed="right">
           <template #default="{ row }">
             <el-button size="small" text type="primary" @click="$emit('select', row)">详情</el-button>
+            <!-- 4.8：改名原先没有入口，只能走"批量删除勾一台"这条歪路 -->
+            <el-button size="small" text @click="$emit('rename', row)">改名</el-button>
           </template>
         </el-table-column>
         <template #empty>
@@ -80,10 +87,12 @@ const props = defineProps({
   total: { type: Number, default: 0 },
   page: { type: Number, default: 1 },
   size: { type: Number, default: 20 },
-  products: { type: Array, default: () => [] }
+  products: { type: Array, default: () => [] },
+  /** 4.2：当前排序（el-table 的 {prop, order} 形态）—— 从 URL 恢复时用它点亮列头箭头 */
+  defaultSort: { type: Object, default: () => ({}) }
 })
 
-const emit = defineEmits(['select', 'page-change', 'size-change', 'selection-change'])
+const emit = defineEmits(['select', 'rename', 'page-change', 'size-change', 'selection-change', 'sort-change'])
 
 const tableRef = ref()
 

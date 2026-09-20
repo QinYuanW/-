@@ -155,11 +155,33 @@
       :page="page"
       :size="size"
       :products="products"
+      :default-sort="defaultSort"
       @select="handleSelect"
+      @rename="openRename"
+      @sort-change="handleSortChange"
       @page-change="handlePageChange"
       @size-change="handleSizeChange"
       @selection-change="handleSelectionChange"
     />
+
+    <!-- 4.8：改设备名称（启停/删除是另外两个语义，不混在这里） -->
+    <el-dialog v-model="renameVisible" title="修改设备名称" width="420px">
+      <div class="rename-tip">
+        设备标识 <span class="mono">{{ renameForm.device_key }}</span> 不可更改；
+        名称只用于展示与搜索。
+      </div>
+      <el-input
+        v-model="renameForm.device_name"
+        placeholder="请输入新的设备名称"
+        maxlength="64"
+        show-word-limit
+        @keyup.enter="confirmRename"
+      />
+      <template #footer>
+        <el-button @click="renameVisible = false">取消</el-button>
+        <el-button type="primary" :loading="renaming" @click="confirmRename">保存</el-button>
+      </template>
+    </el-dialog>
 
     <!-- E4：批量移入分组 -->
     <el-dialog v-model="moveDialogVisible" title="移入分组" width="420px">
@@ -194,7 +216,8 @@ import {
   deleteDevices,
   listDeviceGroups,
   assignDevicesToGroup,
-  updateDeviceStatus
+  updateDeviceStatus,
+  renameDevice
 } from '../api'
 import { downloadCsv, formatTime } from '../utils/export'
 import { createTelemetrySocket } from '../api/ws'
@@ -245,6 +268,54 @@ const listRef = ref()
 const registerRef = ref()
 const batchListRef = ref()
 
+// ===== 4.2 排序 =====
+// 交给后端排（前端只能排当前页 20 条，而这里有 1000+ 台、50 多页，那样排出来的结果是错的）
+const sortBy = ref('')
+const sortOrder = ref('')
+
+/** 从 URL 恢复时点亮列头箭头（el-table 的 default-sort 只在初始化时生效） */
+const defaultSort = computed(() => (
+  sortBy.value ? { prop: sortBy.value, order: sortOrder.value === 'asc' ? 'ascending' : 'descending' } : {}
+))
+
+function handleSortChange({ prop, order }) {
+  // order 为 null = 用户点了第三次（取消排序）→ 回到后端默认的「在线优先 + 最近活跃」
+  sortBy.value = order ? (prop || '') : ''
+  sortOrder.value = order === 'ascending' ? 'asc' : order === 'descending' ? 'desc' : ''
+  page.value = 1
+  loadDevices()
+}
+
+// ===== 4.8 改设备名称 =====
+const renameVisible = ref(false)
+const renaming = ref(false)
+const renameForm = reactive({ device_key: '', device_name: '' })
+
+function openRename(row) {
+  renameForm.device_key = row.device_key
+  renameForm.device_name = row.device_name || ''
+  renameVisible.value = true
+}
+
+async function confirmRename() {
+  const name = renameForm.device_name.trim()
+  if (!name) {
+    ElMessage.warning('设备名称不能为空')
+    return
+  }
+  renaming.value = true
+  try {
+    const res = await renameDevice(renameForm.device_key, name)
+    ElMessage.success(res.data?.updated ? '名称已更新' : '名称没有变化')
+    renameVisible.value = false
+    loadDevices()
+  } catch (e) {
+    // 拦截器已提示
+  } finally {
+    renaming.value = false
+  }
+}
+
 const EXPORT_LIMIT = 5000
 
 async function loadDevices(opts) {
@@ -259,7 +330,9 @@ async function loadDevices(opts) {
       keyword.value,
       productKey.value,
       statusFilter.value,
-      groupFilter.value
+      groupFilter.value,
+      sortBy.value,
+      sortOrder.value
     )
     devices.value = res.data.items || []
     total.value = res.data.total || 0
@@ -544,7 +617,7 @@ async function fetchAllForExport() {
   const all = []
   let p = 1
   while (all.length < EXPORT_LIMIT) {
-    const res = await listDevices(p, 100, keyword.value, productKey.value, statusFilter.value)
+    const res = await listDevices(p, 100, keyword.value, productKey.value, statusFilter.value, groupFilter.value, sortBy.value, sortOrder.value)
     const items = res.data.items || []
     all.push(...items)
     if (all.length >= (res.data.total || 0)) break
@@ -596,6 +669,9 @@ onMounted(() => {
   }
   if (q.product_key) productKey.value = String(q.product_key)
   if (q.keyword) keyword.value = String(q.keyword)
+  // 4.2：排序也能从 URL 恢复，链接分享出去看到的顺序一致
+  if (q.sort) sortBy.value = String(q.sort)
+  if (q.order) sortOrder.value = String(q.order)
 
   syncQuery()
   loadDevices()
@@ -623,14 +699,17 @@ function syncQuery() {
   keyword.value.trim() ? set('keyword', keyword.value.trim()) : clear('keyword')
   // 分组：null = 全部分组（清掉）；0 = 未分组，是有效值必须留下
   groupFilter.value === null ? clear('group_id') : set('group_id', groupFilter.value)
+  // 4.2：排序（空 = 后端默认的「在线优先 + 最近活跃」）
+  sortBy.value ? set('sort', sortBy.value) : clear('sort')
+  sortOrder.value ? set('order', sortOrder.value) : clear('order')
 
   // 逐键排序后比较：对象字面量的键序不保证一致，直接 JSON.stringify 会误判"变了"而反复 replace
   const canon = (o) => JSON.stringify(Object.keys(o).sort().map((k) => [k, String(o[k])]))
   if (canon(next) !== canon(route.query)) router.replace({ query: next })
 }
 
-// 筛选一变就同步 URL（筛选控件分散在模板各处，用 watch 比逐个改 @change handler 更不容易漏）
-watch([statusFilter, productKey, keyword, groupFilter], syncQuery)
+// 筛选/排序一变就同步 URL（控件分散在模板各处，用 watch 比逐个改 @change handler 更不容易漏）
+watch([statusFilter, productKey, keyword, groupFilter, sortBy, sortOrder], syncQuery)
 
 onBeforeUnmount(() => {
   clearTimeout(searchTimer)
@@ -673,6 +752,19 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* 4.8：改名弹窗里的说明（说清"能改什么、不能改什么"） */
+.rename-tip {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.7;
+  margin-bottom: 10px;
+}
+
+.rename-tip .mono {
+  font-family: Consolas, monospace;
+  color: #1f2937;
 }
 
 /* 4.5：实时/轮询指示点 —— 让"数据是不是活的"可见。

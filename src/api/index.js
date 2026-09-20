@@ -54,7 +54,9 @@ export const listDevices = (
   keyword = '',
   productKey = '',
   onlineStatus = 0,
-  groupId = null
+  groupId = null,
+  sort = '',
+  order = ''
 ) =>
   http.get('/devices', {
     params: {
@@ -63,9 +65,16 @@ export const listDevices = (
       keyword: keyword || undefined,
       product_key: productKey || undefined,
       online_status: onlineStatus > 0 ? onlineStatus : undefined,
-      group_id: groupId === null || groupId === undefined ? undefined : groupId
+      group_id: groupId === null || groupId === undefined ? undefined : groupId,
+      // 4.2：排序由后端做 —— 只排当前页是错的（1000+ 台、50 多页）
+      sort: sort || undefined,
+      order: order || undefined
     }
   })
+
+/** 4.8：改设备名称（只改名称；启停走 updateDeviceStatus，删除走 deleteDevices） */
+export const renameDevice = (deviceKey, deviceName) =>
+  http.put(`/devices/${deviceKey}`, { device_name: deviceName })
 
 // ===== 3.3 设备列表增强 =====
 
@@ -137,6 +146,19 @@ export const assignDevicesToGroup = (id, deviceKeys) =>
  */
 export const updateProductStatus = (productKey, status) =>
   http.put(`/products/${productKey}/status`, { status })
+
+/** 6.1：改产品名称（只改 name；物模型走 updateProductTsl，启停走 updateProductStatus） */
+export const renameProduct = (productKey, name) =>
+  http.put(`/products/${productKey}`, { name })
+
+/**
+ * 6.1：删除产品。
+ *
+ * <p>后端带护栏：名下还有未删除设备时会被拒绝（4001）—— 否则那些设备会指向一个
+ * 不存在的产品，认证/物模型/级联停用全部失效且界面上救不回来。
+ */
+export const deleteProduct = (productKey) =>
+  http.delete(`/products/${productKey}`)
 
 /**
  * 批量启停设备。

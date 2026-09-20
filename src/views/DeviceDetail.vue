@@ -34,7 +34,7 @@
             最新数据
             <span class="muted">按物模型 TSL 自动渲染</span>
           </div>
-          <MetricCards :tsl="tsl" :telemetry="latest" :loading="telemetryLoading" />
+          <MetricCards :tsl="tsl" :telemetry="latest" :ts="latestTs" :loading="telemetryLoading" />
         </div>
         <div class="panel">
           <div class="panel-title">历史曲线</div>
@@ -199,6 +199,8 @@ const device = ref(null)
 const products = ref([])
 const tsl = ref(null)
 const latest = ref({})
+/** 5.3：最新遥测的数据时间（epoch 毫秒；0 = 还没有数据） */
+const latestTs = ref(0)
 const telemetryLoading = ref(false)
 const activeTab = ref(route.query.tab || 'info')
 
@@ -274,9 +276,16 @@ async function loadTsl() {
 async function loadLatest() {
   telemetryLoading.value = true
   try {
-    latest.value = (await getLatestTelemetry(key.value)).data || {}
+    // 5.3：接口响应体从「裸属性表」改成 {ts, properties} —— ts 用来显示「数据时间」，
+    // 否则看到 26.5℃ 无法判断是刚上报的还是几小时前的。
+    // 这里同时兼容旧结构：前端与后端是两个独立仓库/进程，改接口时必然有一段
+    // 「前端已更新、后端还没重启」的窗口 —— 不兼容的话那段时间卡片全变成 "--"。
+    const d = (await getLatestTelemetry(key.value)).data || {}
+    latest.value = d.properties || d
+    latestTs.value = Number(d.ts) || 0
   } catch {
     latest.value = {}
+    latestTs.value = 0
   } finally {
     telemetryLoading.value = false
   }
@@ -409,6 +418,8 @@ function connectRealtime() {
       if (msg.device_key !== key.value) return
       if (msg.type === 'telemetry' && msg.properties) {
         latest.value = { ...latest.value, ...msg.properties }
+        // 5.3：WS 报文里的 ts 也要落到"数据时间"上，否则卡片显示的时间会停在首屏那一次
+        if (msg.ts) latestTs.value = Number(msg.ts)
       } else if (msg.type === 'status' && device.value) {
         device.value = { ...device.value, online_status: msg.online_status }
       }
