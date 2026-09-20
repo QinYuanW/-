@@ -170,7 +170,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Plus, Operation, Download, Tickets, Grid, List } from '@element-plus/icons-vue'
@@ -462,16 +462,51 @@ function exportRows(rows) {
 }
 
 onMounted(() => {
-  // E4：支持从「设备分组」页跳转过来时带分组筛选（?group_id=0 表示未分组）
-  const q = route.query.group_id
-  if (q !== undefined && q !== null && q !== '') {
-    groupFilter.value = Number(q)
+  // 支持从别处带着筛选跳过来（仪表盘下钻 / 设备分组页跳转），并从 URL 恢复筛选状态
+  const q = route.query
+  // E4：?group_id=0 表示未分组
+  if (q.group_id !== undefined && q.group_id !== null && q.group_id !== '') {
+    groupFilter.value = Number(q.group_id)
   }
+  // 3.1：?status=1 在线 / 2 离线（对齐 online_status 口径；0 或空 = 全部）
+  if (q.status !== undefined && q.status !== null && q.status !== '') {
+    statusFilter.value = Number(q.status)
+  }
+  if (q.product_key) productKey.value = String(q.product_key)
+  if (q.keyword) keyword.value = String(q.keyword)
+
+  syncQuery()
   loadDevices()
   loadProducts()
   loadGroups()
   loadStats()
 })
+
+/**
+ * 把当前筛选写回 URL（replace，不留历史记录）。
+ *
+ * 这样「仪表盘下钻 → 设备列表」落下的是**带筛选的链接**：刷新不丢、能直接发给别人，
+ * 也回答了"我到底筛了什么"（筛选控件本身也会显示选中态）。
+ * ⚠️ 值为默认值时必须从 query 里删掉，否则 URL 会挂满 `status=0&product_key=` 这类噪音。
+ */
+function syncQuery() {
+  const next = { ...route.query }
+  const set = (k, v) => { next[k] = String(v) }
+  const clear = (k) => { delete next[k] }
+
+  statusFilter.value ? set('status', statusFilter.value) : clear('status')
+  productKey.value ? set('product_key', productKey.value) : clear('product_key')
+  keyword.value.trim() ? set('keyword', keyword.value.trim()) : clear('keyword')
+  // 分组：null = 全部分组（清掉）；0 = 未分组，是有效值必须留下
+  groupFilter.value === null ? clear('group_id') : set('group_id', groupFilter.value)
+
+  // 逐键排序后比较：对象字面量的键序不保证一致，直接 JSON.stringify 会误判"变了"而反复 replace
+  const canon = (o) => JSON.stringify(Object.keys(o).sort().map((k) => [k, String(o[k])]))
+  if (canon(next) !== canon(route.query)) router.replace({ query: next })
+}
+
+// 筛选一变就同步 URL（筛选控件分散在模板各处，用 watch 比逐个改 @change handler 更不容易漏）
+watch([statusFilter, productKey, keyword, groupFilter], syncQuery)
 
 onBeforeUnmount(() => clearTimeout(searchTimer))
 </script>

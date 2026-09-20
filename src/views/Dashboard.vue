@@ -1,11 +1,35 @@
 <template>
   <div class="dashboard">
+    <!-- 3.6：当前只有「物联概览」一个页签，就别再摆成 tab 的样子 —— 一个点了没反应的 tab
+         只会暗示"还有别的"。等真的加了第二个页签，再换回 el-tabs。
+         3.2：右侧给「更新于 + 刷新」，让"这份数据有多新"一眼可见。 -->
     <div class="page-tabs">
-      <span class="tab active">物联概览</span>
+      <span class="page-heading">物联概览</span>
+      <div class="tabs-right">
+        <span class="updated-at">{{ updatedText }}</span>
+        <el-button
+          link
+          type="primary"
+          size="small"
+          :icon="Refresh"
+          :loading="loading"
+          @click="manualRefresh"
+        >
+          刷新
+        </el-button>
+      </div>
     </div>
 
+    <!-- 3.1：卡片与脚注都可下钻 —— 看到「33 个产品」本能地想点进去，之前点不动 -->
     <div class="stats-bar">
-      <div v-for="c in statCards" :key="c.key" class="stat-card">
+      <div
+        v-for="c in statCards"
+        :key="c.key"
+        class="stat-card"
+        :class="{ clickable: !!c.go }"
+        :title="c.tip || ''"
+        @click="c.go && c.go()"
+      >
         <div class="stat-main">
           <div class="stat-icon" :style="{ background: c.gradient }">
             <el-icon :size="22"><component :is="c.icon" /></el-icon>
@@ -23,7 +47,11 @@
             :disabled="!f.tip"
             placement="top"
           >
-            <div class="foot-item">
+            <div
+              class="foot-item"
+              :class="{ clickable: !!f.go }"
+              @click.stop="f.go && f.go()"
+            >
               <el-icon :size="13" :color="f.color"><component :is="f.icon" /></el-icon>
               <span class="foot-label">{{ f.label }}</span>
               <b class="foot-value">{{ f.value }}</b>
@@ -34,7 +62,7 @@
     </div>
 
     <div class="mid-grid">
-      <section class="panel">
+      <section id="panel-message" class="panel">
         <div class="panel-title">设备消息</div>
         <div ref="trendEl" class="trend-chart"></div>
       </section>
@@ -48,7 +76,7 @@
       </section>
     </div>
 
-    <section class="panel">
+    <section id="panel-alarm" class="panel">
       <div class="panel-title">告警消息</div>
       <el-table :data="alarmList" size="small">
         <el-table-column prop="alarmType" label="告警类型" width="110" />
@@ -76,7 +104,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import * as echarts from 'echarts'
 import {
   Box,
@@ -87,7 +116,8 @@ import {
   VideoPause,
   Calendar,
   Clock,
-  Warning
+  Warning,
+  Refresh
 } from '@element-plus/icons-vue'
 import { getStatsOverview, getMessageTrend, listAlerts } from '../api'
 
@@ -108,6 +138,54 @@ const loading = ref(false)
 const typeEl = ref()
 let typeChart = null
 
+const router = useRouter()
+
+// ===== 3.2 自动刷新 =====
+// 之前只在 onMounted 拉一次：开着页面盯数据，数字永远不动，用户会以为"系统卡了"。
+// 现在 30s 轮询 + 显式「更新于」时间戳，让"这份数据有多新"一眼可见。
+const REFRESH_MS = 30000
+const lastUpdated = ref(null)
+let refreshTimer = null
+
+const updatedText = computed(() => {
+  if (!lastUpdated.value) return '加载中…'
+  const p = (n) => String(n).padStart(2, '0')
+  const d = lastUpdated.value
+  return `更新于 ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+})
+
+/** 自动刷新走静默模式：不闪 loading，否则页面每 30s 抖一下 */
+function refreshTick() {
+  loadDashboard({ silent: true })
+}
+
+function manualRefresh() {
+  loadDashboard()
+}
+
+function startAutoRefresh() {
+  stopAutoRefresh()
+  refreshTimer = setInterval(() => {
+    // 标签页不可见时不刷新：省请求，也免得切回来看到的是"暂停那一刻"的旧值
+    if (document.visibilityState === 'visible') refreshTick()
+  }, REFRESH_MS)
+}
+
+function stopAutoRefresh() {
+  if (refreshTimer) clearInterval(refreshTimer)
+  refreshTimer = null
+}
+
+function onVisibilityChange() {
+  // 回到前台立刻补一次，别让用户对着几分钟前的数字做判断
+  if (document.visibilityState === 'visible') refreshTick()
+}
+
+/** 3.1 下钻：滚到本页某个区块（消息卡 / 告警卡没有独立列表页，落到对应面板最合适） */
+function scrollToPanel(id) {
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
 /** 通知趋势图重绘（数据是异步到的，initTrend 时可能还是空的） */
 const trendReady = ref(false)
 
@@ -126,6 +204,9 @@ const statCards = computed(() => [
     value: overview.product.total,
     icon: Box,
     gradient: 'linear-gradient(135deg, #60a5fa, #2563eb)',
+    // 3.1 下钻：产品卡 → 产品列表
+    go: () => router.push('/products'),
+    tip: '点击查看产品列表',
     // 产品只有「配置态」维度 —— 它没有"在线"概念，正常/已停用就是它的真实状态
     // 术语与配色统一（2026-09-15）：产品卡片用「已停用」，仪表盘此前叫「禁用」+ 琥珀色 ——
     // 同一个概念三个叫法、两种颜色，用户得自己翻译。现统一为「已停用」+ 红（#dc2626）。
@@ -140,6 +221,10 @@ const statCards = computed(() => [
     value: overview.device.online,
     icon: Monitor,
     gradient: 'linear-gradient(135deg, #818cf8, #6366f1)',
+    // 3.1 下钻：整卡 → 设备列表（最常用）；脚注再精确到在线 / 离线
+    // （设备列表页本来就有状态筛选控件，带 query 过去控件会显示选中态 —— 用户看得见筛了什么）
+    go: () => router.push('/'),
+    tip: '点击查看设备列表',
     // 设备卡片以「运行态」为主：在线/离线是打开仪表盘第一眼想知道、且时刻在变的指标。
     // 配置态异常只在**确实存在时**追加，不占常规位置 ——
     // 这样既对齐 JetLinks 的信息优先级，又不会让"我停过哪台设备"静默消失。
@@ -150,8 +235,12 @@ const statCards = computed(() => [
     // 现改用 device.unavailable = 自身停用 + 被产品牵连，并悬停给出拆解
     // —— 保留「是谁拖的」这一处置线索（前者去设备页启用，后者去产品页启用）。
     foot: [
-      { icon: CircleCheckFilled, color: '#16a34a', label: '在线', value: overview.device.online },
-      { icon: VideoPause, color: '#f59e0b', label: '离线', value: overview.device.offline },
+      { icon: CircleCheckFilled, color: '#16a34a', label: '在线', value: overview.device.online,
+        go: () => router.push({ path: '/', query: { status: '1' } }), tip: '只看在线设备' },
+      { icon: VideoPause, color: '#f59e0b', label: '离线', value: overview.device.offline,
+        go: () => router.push({ path: '/', query: { status: '2' } }), tip: '只看离线设备' },
+      // 「不可用」刻意不给下钻：设备列表的状态筛选只支持在线/离线，
+      // 而这里的不可用 = 自身停用 + 被产品牵连，跳过去反而筛不出来（点不动比点错好）
       ...(overview.device.unavailable > 0
         ? [{
             icon: Warning,
@@ -169,6 +258,9 @@ const statCards = computed(() => [
     value: formatWan(overview.message.total),
     icon: ChatDotRound,
     gradient: 'linear-gradient(135deg, #fba97a, #f97316)',
+    // 3.1 下钻：消息没有独立列表页，落到本页「设备消息」趋势图最合适
+    go: () => scrollToPanel('panel-message'),
+    tip: '定位到下方「设备消息」趋势',
     foot: [
       { icon: Calendar, color: '#3b82f6', label: '本月', value: formatWan(overview.message.month) },
       { icon: Clock, color: '#fbbf24', label: '今日', value: formatWan(overview.message.today) }
@@ -180,6 +272,9 @@ const statCards = computed(() => [
     value: overview.alarm.total,
     icon: Bell,
     gradient: 'linear-gradient(135deg, #c4b5fd, #a78bfa)',
+    // 3.1 下钻：告警没有独立列表页，落到本页「告警消息」表
+    go: () => scrollToPanel('panel-alarm'),
+    tip: '定位到下方「告警消息」列表',
     foot: [
       { icon: Calendar, color: '#3b82f6', label: '本月', value: overview.alarm.month },
       { icon: Clock, color: '#fbbf24', label: '今日', value: overview.alarm.today }
@@ -189,7 +284,11 @@ const statCards = computed(() => [
 
 function initTrend() {
   if (!trendEl.value) return
-  chart = echarts.init(trendEl.value)
+  if (!chart) {
+    chart = echarts.init(trendEl.value)
+    window.addEventListener('resize', onResize)   // 只注册一次
+  }
+  // notMerge=true：桶数会随刷新变化，必须整体替换配置，否则新旧 series 会合并出错
   chart.setOption({
     grid: { left: 76, right: 24, top: 24, bottom: 36 },
     tooltip: {
@@ -251,8 +350,7 @@ function initTrend() {
         itemStyle: { color: '#f59e0b' }
       }
     ]
-  })
-  window.addEventListener('resize', onResize)
+  }, true)
 }
 
 function onResize() {
@@ -260,8 +358,8 @@ function onResize() {
   typeChart && typeChart.resize()
 }
 
-async function loadDashboard() {
-  loading.value = true
+async function loadDashboard({ silent = false } = {}) {
+  if (!silent) loading.value = true
   try {
     const [ov, trend, alarms] = await Promise.all([
       getStatsOverview(),
@@ -290,17 +388,30 @@ async function loadDashboard() {
     }))
     alarmTypes.value = alarms.data?.types || []
     trendReady.value = true
+    lastUpdated.value = new Date()
+    await renderCharts()
   } catch (e) {
     // 拦截器已提示；保留空态渲染，不阻塞页面
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
+}
+
+/**
+ * 图表渲染。抽出来是为了让「首次加载」与「30s 刷新」走同一条路径 ——
+ * 否则刷新只更新数字、图还是旧的（这正是之前没有自动刷新时没人发现的原因）。
+ */
+async function renderCharts() {
+  // v-if 的容器要等 DOM 更新后才存在（告警类型图在无数据时压根不渲染）
+  await nextTick()
+  initTrend()
+  initTypeChart()
 }
 
 /** 告警类型分布（环形图）—— 数据取自 /alerts 的 types 段 */
 function initTypeChart() {
   if (!typeEl.value || !alarmTypes.value.length) return
-  typeChart = echarts.init(typeEl.value)
+  if (!typeChart) typeChart = echarts.init(typeEl.value)
   typeChart.setOption({
     tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
     legend: { bottom: 0, icon: 'circle', textStyle: { color: '#6b7280', fontSize: 12 } },
@@ -314,17 +425,20 @@ function initTypeChart() {
       label: { formatter: '{b} {c}', color: '#6b7280', fontSize: 11 },
       data: alarmTypes.value.map((t) => ({ name: t.name, value: Number(t.count) }))
     }]
-  })
+  }, true)
 }
 
-// 必须先取数再画图：否则 xAxis/series 拿到的是空数组，图表会是空白
+// 必须先取数再画图：loadDashboard 内部取数后会 await renderCharts()，
+// 否则 xAxis/series 拿到的是空数组，图表会是空白
 onMounted(async () => {
   await loadDashboard()
-  initTrend()
-  initTypeChart()
+  startAutoRefresh()
+  document.addEventListener('visibilitychange', onVisibilityChange)
 })
 
 onBeforeUnmount(() => {
+  stopAutoRefresh()
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   window.removeEventListener('resize', onResize)
   chart && chart.dispose()
   typeChart && typeChart.dispose()
@@ -343,20 +457,28 @@ onBeforeUnmount(() => {
 
 .page-tabs {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
-.tab {
+/* 3.6：单页签时用普通标题，而不是"tab 外观" —— 一个点了没反应的 tab 只会暗示"还有别的" */
+.page-heading {
   font-size: 14px;
-  padding: 6px 16px;
-  border-radius: 6px;
-  color: #6b7280;
-  cursor: pointer;
+  font-weight: 600;
+  color: #1f2937;
+  padding: 6px 0;
 }
 
-.tab.active {
-  background: #e6f4ff;
-  color: #2563eb;
-  font-weight: 500;
+.tabs-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.updated-at {
+  font-size: 12px;
+  color: #9ca3af;
+  font-variant-numeric: tabular-nums; /* 秒数跳动时不左右晃 */
 }
 
 .stats-bar {
@@ -370,6 +492,28 @@ onBeforeUnmount(() => {
   border: 1px solid #eef1f6;
   border-radius: 10px;
   padding: 16px 18px;
+}
+
+/* 3.1：只给"真有去处"的卡片加可点样式 —— 不可点的卡片保持原样，
+   否则用户学会"卡片都能点"之后，点到不响应的卡片会以为坏了 */
+.stat-card.clickable {
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.stat-card.clickable:hover {
+  border-color: #c7d7f5;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.1);
+}
+
+.foot-item.clickable {
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.foot-item.clickable:hover {
+  background: #f3f7ff;
 }
 
 .stat-main {
