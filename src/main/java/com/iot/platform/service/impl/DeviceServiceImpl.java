@@ -25,6 +25,7 @@ import com.iot.platform.service.AuthService;
 import com.iot.platform.service.DeviceService;
 import com.iot.platform.service.ShadowService;
 import com.iot.platform.util.SecretCipher;
+import com.iot.platform.ws.TelemetryWebSocketHandler;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -57,6 +58,13 @@ public class DeviceServiceImpl implements DeviceService {
     private final AuthService authService;
     /** F3：device_secret 加密存储 —— 库中只落密文，明文仅注册响应一次性返回 */
     private final SecretCipher secretCipher;
+    /**
+     * E2 实时推送：心跳超时置离线时向 WS 订阅者广播 {@code type:"status"}。
+     *
+     * <p>与上线的广播（TelemetryServiceImpl.refreshOnline）配对 —— 缺了这一侧，
+     * 设备列表上的「在线」就只能等下一次重新拉接口才会变回「离线」。
+     */
+    private final TelemetryWebSocketHandler wsHandler;
 
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final DateTimeFormatter KEY_TS = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
@@ -340,6 +348,8 @@ public class DeviceServiceImpl implements DeviceService {
                     .eq(Device::getId, d.getId())
                     .eq(Device::getOnlineStatus, 1));
             insertLog(d.getId(), 2, "心跳超时离线（> " + OFFLINE_TIMEOUT_SECONDS + "s 无上报）");
+            // E2：把「下线」也推给订阅者 —— 否则设备列表的在线状态只能靠重新拉接口纠正
+            wsHandler.broadcastStatus(d.getDeviceKey(), 0);
         }
         log.info("offline scan: {} devices -> OFFLINE", stale.size());
     }

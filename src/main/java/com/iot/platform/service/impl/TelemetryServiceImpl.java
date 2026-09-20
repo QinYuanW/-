@@ -16,6 +16,7 @@ import com.iot.platform.service.AuthService;
 import com.iot.platform.service.ShadowService;
 import com.iot.platform.service.ShadowSyncService;
 import com.iot.platform.service.TelemetryService;
+import com.iot.platform.ws.TelemetryWebSocketHandler;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -47,6 +48,14 @@ public class TelemetryServiceImpl implements TelemetryService {
     private final ShadowSyncService shadowSyncService;
     /** F2 停用拦截（复用认证缓存，命中时零查库） */
     private final AuthService authService;
+    /**
+     * E2 实时推送：设备上线（0→1）时向 WS 订阅者广播 {@code type:"status"}。
+     *
+     * <p>契约 §9 早就写了这个报文，但 `broadcastStatus` 一直没有调用方 —— 后端只在
+     * 「收到上报」这一侧改变了状态，却没人告诉客户端，于是设备列表只能靠重新拉接口
+     * 才能看到上下线。补上这条广播，契约才和实现对得上。
+     */
+    private final TelemetryWebSocketHandler wsHandler;
 
     /** 设备在线状态聚合刷新窗口：窗口内每设备只写一次 device 表，缓和高并发 hot-row 锁竞争（BUG-17 §3.3） */
     private static final Duration ONLINE_FLUSH_WINDOW = Duration.ofSeconds(5);
@@ -163,6 +172,10 @@ public class TelemetryServiceImpl implements TelemetryService {
             logEntry.setContent("设备上线（收到上报）");
             logEntry.setCreatedAt(now);
             deviceLogMapper.insert(logEntry);
+
+            // E2：只在**真正的转换**上广播（0→1）—— 否则每来一条上报都推一次，
+            // 订阅了全部设备的客户端会被刷屏。sessions 为空时方法内部直接 return，热点路径开销可忽略。
+            wsHandler.broadcastStatus(deviceKey, 1);
 
             // E1：0→1 是天然的「设备上线」事件钩子 —— 触发影子同步
             //（补发离线指令 + 对齐期望值）。内部已吞异常，不会影响本线程的遥测处理。
