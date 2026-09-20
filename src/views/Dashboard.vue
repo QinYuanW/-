@@ -76,6 +76,67 @@
       </section>
     </div>
 
+    <!-- 3.3：旧版有、本次重做按参照图删掉的两个模块。
+         参照图没有不代表不需要 —— 缺了它们就失去了"一键进最近在用的设备"这条捷径。 -->
+    <div class="low-grid">
+      <section class="panel">
+        <div class="panel-title">
+          最近活跃设备
+          <el-button link type="primary" size="small" @click="router.push('/')">全部设备</el-button>
+        </div>
+        <el-table :data="recentDevices" size="small">
+          <el-table-column label="设备" min-width="170" show-overflow-tooltip>
+            <template #default="{ row }">
+              <a class="dev-link" @click="router.push(`/devices/${row.device_key}`)">
+                {{ row.device_name || row.device_key }}
+              </a>
+            </template>
+          </el-table-column>
+          <el-table-column label="产品" min-width="120" show-overflow-tooltip>
+            <template #default="{ row }">{{ productName(row.product_key) }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="80">
+            <template #default="{ row }">
+              <span class="mini-status" :class="row.online_status === 1 ? 'on' : 'off'">
+                {{ row.online_status === 1 ? '在线' : '离线' }}
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column label="最后在线" width="160">
+            <template #default="{ row }">{{ formatTime(row.last_online_at) }}</template>
+          </el-table-column>
+          <template #empty>
+            <el-empty description="暂无设备" :image-size="60" />
+          </template>
+        </el-table>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title">
+          产品概览
+          <el-button link type="primary" size="small" @click="router.push('/products')">全部产品</el-button>
+        </div>
+        <ul class="prod-list">
+          <li
+            v-for="p in productOverview"
+            :key="p.product_key"
+            @click="router.push(`/products/${p.product_key}`)"
+          >
+            <div class="pl-top">
+              <span class="pl-name">{{ p.name }}</span>
+              <span class="pl-key">{{ p.product_key }}</span>
+              <span v-if="p.status === 0" class="mini-status off">已停用</span>
+            </div>
+            <div class="pl-meta">
+              <span>{{ p.property_count }} 属性 · {{ p.event_count }} 事件 · {{ p.service_count }} 服务</span>
+              <span class="pl-dev">{{ p.device_count }} 台设备</span>
+            </div>
+          </li>
+          <li v-if="!productOverview.length" class="pl-empty">暂无产品</li>
+        </ul>
+      </section>
+    </div>
+
     <section id="panel-alarm" class="panel">
       <div class="panel-title">告警消息</div>
       <el-table :data="alarmList" size="small">
@@ -119,7 +180,8 @@ import {
   Warning,
   Refresh
 } from '@element-plus/icons-vue'
-import { getStatsOverview, getMessageTrend, listAlerts } from '../api'
+import { getStatsOverview, getMessageTrend, listAlerts, listDevices, listProducts } from '../api'
+import { formatTime } from '../utils/export'
 
 // ===== 实时数据（E6 接入，mock 已下线）=====
 // 刻意保持与 mock 相同的结构，这样模板与 statCards / initTrend 的引用方式无需改动。
@@ -390,6 +452,10 @@ async function loadDashboard({ silent = false } = {}) {
     trendReady.value = true
     lastUpdated.value = new Date()
     await renderCharts()
+    // 3.3：最近活跃设备跟着 30s 刷新（会上下线、顺序会变）；
+    // 产品概览只在进页面/手动刷新时取，理由见 loadProductOverview 的注释
+    loadRecentDevices()
+    if (!silent) loadProductOverview()
   } catch (e) {
     // 拦截器已提示；保留空态渲染，不阻塞页面
   } finally {
@@ -406,6 +472,59 @@ async function renderCharts() {
   await nextTick()
   initTrend()
   initTypeChart()
+}
+
+// ===== 3.3 补回旧版被删掉的两个模块 =====
+// 本次仪表盘重做按参照图删掉了「最近活跃设备」和「产品概览」，用户因此失去了
+// "一键进最近在用的设备"这条捷径 —— 参照图没有不代表不需要。
+const recentDevices = ref([])
+const productOverview = ref([])
+/** 产品列表（供设备行显示产品名，避免每行再查一次） */
+const productsForName = ref([])
+
+const productName = (key) => {
+  const p = productsForName.value.find((x) => x.product_key === key)
+  return p ? p.name : key || '-'
+}
+
+async function loadRecentDevices() {
+  try {
+    // 用后端排序（评审 4.2 刚加的 sort 参数）—— 前端排的话只能排当前页
+    const res = await listDevices(1, 5, '', '', 0, null, 'last_online_at', 'desc')
+    recentDevices.value = res.data.items || []
+  } catch {
+    recentDevices.value = []
+  }
+}
+
+/**
+ * 产品概览。
+ *
+ * ⚠️ 只在**进页面 / 手动刷新**时取，不挂进 30s 自动刷新：每个产品都要单独查一次设备数
+ * （后端没有"按产品聚合计数"的接口），跟着 30s 键太勤就是白打 N 个请求。
+ * 而产品与物模型的构成本来也不会每 30 秒变一次 —— 真正需要实时的是「最近活跃设备」，那个挂了自动刷新。
+ *
+ * 设备数用 size=1 只读 total，避免把整页设备拉回来只为数个数。
+ */
+async function loadProductOverview() {
+  try {
+    const prods = (await listProducts()).data.items || []
+    productsForName.value = prods
+    const counts = await Promise.all(prods.map((p) =>
+      listDevices(1, 1, '', p.product_key, 0, null)
+        .then((r) => r.data.total || 0)
+        .catch(() => 0)
+    ))
+    productOverview.value = prods.map((p, i) => ({
+      ...p,
+      property_count: (p.tsl?.properties || []).length,
+      event_count: (p.tsl?.events || []).length,
+      service_count: (p.tsl?.services || []).length,
+      device_count: counts[i]
+    }))
+  } catch {
+    productOverview.value = []
+  }
 }
 
 /** 告警类型分布（环形图）—— 数据取自 /alerts 的 types 段 */
@@ -616,6 +735,109 @@ onBeforeUnmount(() => {
   justify-content: center;
 }
 
+/* ===== 3.3：最近活跃设备 + 产品概览 ===== */
+.low-grid {
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  gap: 12px;
+}
+
+/* 这两个面板的标题右侧各有一个「全部…」跳转入口 —— 只在 .low-grid 内改成两端对齐，
+   不动上面「设备消息 / 告警类型」那两个纯文字标题 */
+.low-grid .panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dev-link {
+  color: #2563eb;
+  cursor: pointer;
+}
+
+.dev-link:hover {
+  text-decoration: underline;
+}
+
+.mini-status {
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: 10px;
+}
+
+.mini-status.on {
+  color: #047857;
+  background: #ecfdf5;
+}
+
+.mini-status.off {
+  color: #6b7280;
+  background: #f1f5f9;
+}
+
+.prod-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.prod-list li {
+  border: 1px solid #eef1f6;
+  border-radius: 8px;
+  padding: 9px 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.prod-list li:hover {
+  border-color: #c7d7f5;
+  background: #f8fbff;
+}
+
+.pl-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pl-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.pl-key {
+  font-size: 12px;
+  color: #9ca3af;
+  font-family: Consolas, monospace;
+}
+
+.pl-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.pl-dev {
+  color: #2563eb;
+  flex-shrink: 0;
+}
+
+.pl-empty {
+  cursor: default;
+  color: #9ca3af;
+  font-size: 13px;
+  text-align: center;
+  padding: 18px 0;
+}
+
 .alarm-status {
   display: inline-block;
   font-size: 12px;
@@ -641,6 +863,11 @@ onBeforeUnmount(() => {
   .mid-grid {
     grid-template-columns: 1fr;
   }
+
+  /* 3.3：窄屏时两个新面板也各占一整行 */
+  .low-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 768px) {
@@ -649,6 +876,10 @@ onBeforeUnmount(() => {
   }
 
   .stats-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .low-grid {
     grid-template-columns: 1fr;
   }
 }

@@ -5,9 +5,31 @@
       <span class="device-name">{{ device?.device_name || key }}</span>
       <el-tag size="small" type="info" effect="plain">{{ key }}</el-tag>
       <el-button text size="small" :icon="CopyDocument" title="复制 device_key" @click="copyKey" />
-      <span class="online-dot" :class="online ? 'on' : ''"></span>
-      <span class="online-text">{{ online ? '在线' : '离线' }}</span>
-    </div>
+        <span class="online-dot" :class="online ? 'on' : ''"></span>
+        <span class="online-text">{{ online ? '在线' : '离线' }}</span>
+        <!-- F5：停用与在线是两个维度。详情页也要显示停用态 —— 否则用户看到"离线"却不知道
+             是自己（或产品）把它停了，而下面正好有「启用」按钮可以恢复 -->
+        <el-tag v-if="device?.status === 0" size="small" type="warning" effect="plain">已停用</el-tag>
+        <el-tag v-else-if="device?.product_enabled === false" size="small" type="danger" effect="plain">
+          产品已停用
+        </el-tag>
+
+        <!-- 5.7：详情页原先没有任何编辑/启停/删除入口（头部只有「返回」）——
+             改个名字都得退回列表页去点。这里补齐，三个动作语义分明：
+             改名（不影响链路）/ 停用（保留数据、可一键恢复）/ 删除（不可逆） -->
+        <el-dropdown class="head-more" @command="onMoreCommand">
+          <el-button text size="small" :icon="MoreFilled">更多</el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="rename">重命名</el-dropdown-item>
+              <el-dropdown-item command="toggle">
+                {{ device?.status === 0 ? '启用设备' : '停用设备' }}
+              </el-dropdown-item>
+              <el-dropdown-item command="delete" divided>删除设备</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+      </div>
 
     <el-tabs v-model="activeTab" class="detail-tabs">
       <el-tab-pane lazy label="设备信息" name="info">
@@ -172,15 +194,43 @@
         </div>
       </el-tab-pane>
     </el-tabs>
+
+    <!-- 5.7：重命名（device_key 不可改 —— 它进 MQTT 主题，改了设备就断了） -->
+    <el-dialog v-model="renameVisible" title="修改设备名称" width="420px">
+      <div class="rename-tip">
+        设备标识 <span class="mono">{{ key }}</span> 不可更改；名称只用于展示与搜索。
+      </div>
+      <el-input
+        v-model="renameForm.device_name"
+        placeholder="请输入新的设备名称"
+        maxlength="64"
+        show-word-limit
+        @keyup.enter="doRename"
+      />
+      <template #footer>
+        <el-button @click="renameVisible = false">取消</el-button>
+        <el-button type="primary" :loading="renaming" @click="doRename">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { Back, CopyDocument } from '@element-plus/icons-vue'
-import { listDevices, listProducts, getTsl, getLatestTelemetry, listDeviceLogs, listDeviceEvents } from '../api'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Back, CopyDocument, MoreFilled } from '@element-plus/icons-vue'
+import {
+  listDevices,
+  listProducts,
+  getTsl,
+  getLatestTelemetry,
+  listDeviceLogs,
+  listDeviceEvents,
+  renameDevice,
+  updateDeviceStatus,
+  deleteDevices
+} from '../api'
 import { createTelemetrySocket } from '../api/ws'
 import { formatTime } from '../utils/export'
 import { copyText } from '../utils/clipboard'
@@ -250,10 +300,101 @@ let pollTimer = null
 
 async function loadDeviceInfo() {
   try {
-    const res = await listDevices(1, 10, key.value, '', 0)
+    // size=50 而不是 10：keyword 是 LIKE 匹配，若本机 key 恰好是另一台的前缀，
+    // 精确那台可能被挤到第 10 条之后 → device 变成 null → 详情页显示"设备不存在"。
+    // 这不是臆测的边界，而是"静默错状态"（页面看着正常，只是说没有这台设备）。
+    const res = await listDevices(1, 50, key.value, '', 0)
     device.value = (res.data.items || []).find((d) => d.device_key === key.value) || null
   } catch {
     device.value = null
+  }
+}
+
+// ===== 5.7 详情页的编辑 / 启停 / 删除 =====
+const renameVisible = ref(false)
+const renaming = ref(false)
+const renameForm = reactive({ device_name: '' })
+
+function onMoreCommand(cmd) {
+  if (cmd === 'rename') openRename()
+  else if (cmd === 'toggle') toggleDeviceStatus()
+  else if (cmd === 'delete') removeDevice()
+}
+
+function openRename() {
+  renameForm.device_name = device.value?.device_name || ''
+  renameVisible.value = true
+}
+
+async function doRename() {
+  const name = renameForm.device_name.trim()
+  if (!name) {
+    ElMessage.warning('设备名称不能为空')
+    return
+  }
+  renaming.value = true
+  try {
+    const res = await renameDevice(key.value, name)
+    ElMessage.success(res.data?.updated ? '名称已更新' : '名称没有变化')
+    renameVisible.value = false
+    await loadDeviceInfo()
+  } catch (e) {
+    // 拦截器已提示
+  } finally {
+    renaming.value = false
+  }
+}
+
+/**
+ * 启用 / 停用。
+ *
+ * <p>走的是**批量启停接口**（单台传长度为 1 的列表）—— 复用同一套语义与缓存失效逻辑，
+ * 不另开一个"单台启停"的端点（那会变成两份要同步维护的行为）。
+ */
+async function toggleDeviceStatus() {
+  const d = device.value
+  if (!d) return
+  const disable = d.status !== 0
+  try {
+    await ElMessageBox.confirm(
+      disable
+        ? `停用后「${d.device_name || d.device_key}」将立即无法接入 MQTT，但遥测、日志、影子、指令全部保留，随时可一键恢复。`
+        : `重新启用「${d.device_name || d.device_key}」后，设备可再次接入。`,
+      disable ? '停用设备' : '启用设备',
+      { type: 'warning', confirmButtonText: disable ? '停用' : '启用' }
+    )
+  } catch {
+    return
+  }
+  try {
+    await updateDeviceStatus([d.device_key], disable ? 0 : 1)
+    ElMessage.success(disable ? '设备已停用' : '设备已启用')
+    await loadDeviceInfo()
+  } catch (e) {
+    // 拦截器已提示
+  }
+}
+
+/** 删除：不可逆，且会级联清理遥测/日志/指令/影子 —— 文案要把这件事说清 */
+async function removeDevice() {
+  const d = device.value
+  if (!d) return
+  try {
+    await ElMessageBox.confirm(
+      `将删除设备「${d.device_name || d.device_key}」（遥测、日志、指令、影子一并清理），此操作不可恢复。\n` +
+      '如果只是暂时不想让它接入，请改用「停用设备」。',
+      '删除设备',
+      { type: 'warning', confirmButtonText: '删除', confirmButtonClass: 'el-button--danger' }
+    )
+  } catch {
+    return
+  }
+  try {
+    await deleteDevices([d.device_key])
+    ElMessage.success('设备已删除')
+    router.push('/')
+  } catch (e) {
+    // 拦截器已提示
   }
 }
 
@@ -394,9 +535,13 @@ function clearLogs(direction) {
 // 保证数据不断档 —— 不会出现"推送挂了页面就死了"。
 
 let wsClient = null
+/** WS 是否已连（决定"回到前台时要不要重启轮询兜底"） */
+let wsConnected = false
 
 function startFallbackPolling() {
-  if (pollTimer) return
+  // 5.8：后台标签页不轮询 —— 每 5 秒打一次接口纯属浪费（评审 5.8），
+  // 而且用户切回来看到的还是"离开那一刻"的旧值，不如回来时立刻补一次。
+  if (pollTimer || document.hidden) return
   pollTimer = setInterval(loadLatest, 5000)
 }
 
@@ -407,13 +552,38 @@ function stopFallbackPolling() {
   }
 }
 
+/**
+ * 5.8：标签页可见性变化。
+ *
+ * <ul>
+ *   <li>隐藏 → 停轮询（省请求）</li>
+ *   <li>回到前台 → **立刻补一次**最新值；WS 未连时顺带恢复轮询兜底</li>
+ * </ul>
+ * 注意"回到前台"这件事本身永远要拉一次：后台期间若 WS 也断了，
+ * 页面在用户眼里会停在旧值上，看不出任何异常。
+ */
+function onVisibilityChange() {
+  if (document.hidden) {
+    stopFallbackPolling()
+    return
+  }
+  loadLatest()
+  if (!wsConnected) startFallbackPolling()
+}
+
 function connectRealtime() {
   wsClient = createTelemetrySocket({
     deviceKey: key.value,
     // WS 连通 → 停掉轮询，兑现「HTTP 轮询 → WS 推送」的优化
-    onOpen: () => stopFallbackPolling(),
+    onOpen: () => {
+      wsConnected = true
+      stopFallbackPolling()
+    },
     // WS 断开 → 立刻恢复轮询兜底（重连由 ws.js 指数退避负责）
-    onClose: () => startFallbackPolling(),
+    onClose: () => {
+      wsConnected = false
+      startFallbackPolling()
+    },
     onMessage: (msg) => {
       if (msg.device_key !== key.value) return
       if (msg.type === 'telemetry' && msg.properties) {
@@ -463,11 +633,13 @@ onMounted(() => {
   init()
   startFallbackPolling()   // 先起兜底；WS 一旦连通会自动把它停掉
   connectRealtime()
+  document.addEventListener('visibilitychange', onVisibilityChange)
 })
 
 onBeforeUnmount(() => {
   disconnectRealtime()
   stopFallbackPolling()
+  document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 </script>
 
@@ -536,6 +708,24 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: #4b5563;
   margin-left: 4px;
+}
+
+/* 5.7：「更多」下拉推到最右 —— 它是页面级操作，不该跟状态标签挤在一起 */
+.head-more {
+  margin-left: auto;
+}
+
+/* 5.7：重命名弹窗里的说明 */
+.rename-tip {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.7;
+  margin-bottom: 10px;
+}
+
+.rename-tip .mono {
+  font-family: Consolas, monospace;
+  color: #1f2937;
 }
 
 .empty-desc p {

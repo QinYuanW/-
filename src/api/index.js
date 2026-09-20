@@ -19,7 +19,9 @@ http.interceptors.response.use(
   (res) => {
     const body = res.data
     if (body && typeof body.code === 'number' && body.code !== 0) {
-      ElMessage.error(body.message || '请求失败')
+      // silentError：把提示交给调用方自己呈现（如登录页要在表单内联显示错误）——
+      // 否则同一个错误既飘 toast 又出现在表单里，噪音翻倍，用户还会以为错了两次
+      if (!res.config?.silentError) ElMessage.error(body.message || '请求失败')
       if (body.code === 4010) {
         localStorage.removeItem('iot_token')
         router.push('/login')
@@ -33,13 +35,22 @@ http.interceptors.response.use(
       localStorage.removeItem('iot_token')
       router.push('/login')
     }
-    ElMessage.error(err.response?.data?.message || err.message || '网络错误')
+    if (!err.config?.silentError) {
+      ElMessage.error(err.response?.data?.message || err.message || '网络错误')
+    }
     return Promise.reject(err)
   }
 )
 
+/**
+ * 登录。
+ *
+ * <p>`silentError`：登录失败要**内联显示在密码框下方**（评审 2.2）——
+ * 用户视线在表单上，错误却飘在屏幕右上角是找不到的。所以这里关掉全局 toast，
+ * 由 Login.vue 自己渲染错误（它还会在网络异常时给一句兜底文案）。
+ */
 export const login = (username, password) =>
-  http.post('/login', { username, password })
+  http.post('/login', { username, password }, { silentError: true })
 
 /**
  * 设备列表。

@@ -11,7 +11,15 @@
 
       <el-form ref="formRef" :model="form" :rules="rules" size="large" @keyup.enter="handleLogin">
         <el-form-item prop="username">
-          <el-input v-model="form.username" placeholder="用户名" :prefix-icon="User" clearable />
+          <!-- 2.3：不再预填 admin（与真实产品行为不符，还等于把默认凭据写在脸上）；
+              交给浏览器 autocomplete 记住，用户下次一个点击就能填上 -->
+          <el-input
+            v-model="form.username"
+            placeholder="用户名"
+            :prefix-icon="User"
+            autocomplete="username"
+            clearable
+          />
         </el-form-item>
         <el-form-item prop="password">
           <el-input
@@ -19,9 +27,21 @@
             type="password"
             placeholder="密码"
             :prefix-icon="Lock"
+            autocomplete="current-password"
             show-password
           />
         </el-form-item>
+
+        <!-- 2.2：登录失败内联显示 —— 用户视线在表单上，错误飘到屏幕右上角的 toast 里是找不到的 -->
+        <el-alert
+          v-if="loginError"
+          class="login-error"
+          :title="loginError"
+          type="error"
+          show-icon
+          :closable="false"
+        />
+
         <el-button
           type="primary"
           class="login-btn"
@@ -40,7 +60,7 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
@@ -49,12 +69,18 @@ import { login } from '../api'
 const router = useRouter()
 const formRef = ref()
 const loading = ref(false)
-const form = reactive({ username: 'admin', password: '' })
+// 2.3：用户名留空（原先预填 'admin' —— 与真实产品行为不符，还暗示了默认凭据）
+const form = reactive({ username: '', password: '' })
+// 2.2：登录失败的内联错误
+const loginError = ref('')
 
 const rules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
 }
+
+// 用户一改动就清掉上次的错误，别让旧提示挂在那里误导
+watch(() => [form.username, form.password], () => { loginError.value = '' })
 
 async function handleLogin() {
   try {
@@ -63,6 +89,7 @@ async function handleLogin() {
     return   // 校验失败：Element 已在表单内联提示，这里只需中断提交
   }
   loading.value = true
+  loginError.value = ''
   try {
     const res = await login(form.username, form.password)
     localStorage.setItem('iot_token', res.data.token)
@@ -70,7 +97,13 @@ async function handleLogin() {
     ElMessage.success('登录成功')
     router.push('/')
   } catch (e) {
-    // 错误提示已由拦截器统一处理
+    // 2.2：内联呈现（拦截器已按 silentError 关掉全局 toast，避免"两处都报同一个错"）
+    loginError.value = e?.message || '登录失败，请稍后重试'
+    // 光标落到密码框：多数失败是密码错，省掉用户一次点击
+    nextTick(() => {
+      const el = document.querySelector('.login-card input[type="password"]')
+      if (el) el.focus()
+    })
   } finally {
     loading.value = false
   }
@@ -98,6 +131,11 @@ async function handleLogin() {
 .login-logo {
   text-align: center;
   margin-bottom: 28px;
+}
+
+/* 2.2：登录失败的内联提示 —— 紧贴表单，别让用户去屏幕角落找错误 */
+.login-error {
+  margin-bottom: 14px;
 }
 
 .logo-box {

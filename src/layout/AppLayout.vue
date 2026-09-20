@@ -51,12 +51,17 @@
 
     <el-container class="app-body">
       <el-header height="56px" class="app-header">
-        <div class="header-left">
-          <el-breadcrumb separator="/" class="app-crumb">
-            <el-breadcrumb-item>首页</el-breadcrumb-item>
-            <el-breadcrumb-item v-for="c in crumbs" :key="c">{{ c }}</el-breadcrumb-item>
-          </el-breadcrumb>
-        </div>
+          <div class="header-left">
+            <el-breadcrumb separator="/" class="app-crumb">
+              <el-breadcrumb-item>首页</el-breadcrumb-item>
+              <el-breadcrumb-item v-for="c in crumbs" :key="c">{{ c }}</el-breadcrumb-item>
+            </el-breadcrumb>
+            <!-- 1.3：窄屏把面包屑整个 display:none 掉，而 ≤900px 侧栏又只剩图标 ——
+                 两者一叠加，页面上就再没有任何文字能回答"我在哪"。
+                 所以窄屏保留**当前页标题**：一级信息不如路径，但比一片空白强得多。
+                 （返回上层的入口由各详情页自己的「返回」按钮承担） -->
+            <span class="crumb-compact">{{ compactTitle }}</span>
+          </div>
         <div class="header-right">
           <span class="user">
             <el-icon><UserFilled /></el-icon>
@@ -90,6 +95,12 @@ const router = useRouter()
  */
 const activeMenu = computed(() => route.meta.menu || route.path)
 const crumbs = computed(() => route.meta.crumb || [route.meta.title || '设备控制台'])
+
+/** 1.3：窄屏显示的一级标题 —— 取面包屑最后一段（最具体的那一层） */
+const compactTitle = computed(() => {
+  const list = crumbs.value
+  return list[list.length - 1] || '设备控制台'
+})
 const username = localStorage.getItem('iot_username') || 'admin'
 
 function handleMenuSelect(index) {
@@ -219,6 +230,14 @@ async function handleLogout() {
   font-size: 13px;
 }
 
+/* 1.3：宽屏用面包屑（有完整路径），窄屏换成一級标题 —— 两者互斥，见下方断点 */
+.crumb-compact {
+  display: none;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
 .page-title {
   font-size: 15px;
   font-weight: 600;
@@ -274,8 +293,13 @@ async function handleLogout() {
 }
 
 @media (max-width: 768px) {
+  /* 1.3：面包屑换成一級标题（而不是直接藏掉不留替代） */
   .app-crumb {
     display: none;
+  }
+
+  .crumb-compact {
+    display: inline-block;
   }
 
   .app-header {
