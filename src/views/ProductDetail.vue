@@ -34,7 +34,20 @@
         <div class="panel">
           <div class="tsl-head">
             <div class="tsl-title">物模型 · {{ product?.name || key }}</div>
-            <el-button type="primary" size="small" :loading="saving" @click="save">保存物模型</el-button>
+            <div class="tsl-actions">
+              <!-- 7.1：把"有未保存改动"显式说出来，并在保存按钮上给出主次 —— 
+                   否则用户看不出当前页面是否已经落库，切走时也不会预期有提醒 -->
+              <el-tag v-if="dirty" size="small" type="warning" effect="plain">有未保存的改动</el-tag>
+              <el-button
+                type="primary"
+                size="small"
+                :loading="saving"
+                :disabled="!dirty"
+                @click="save"
+              >
+                保存物模型
+              </el-button>
+            </div>
           </div>
 
           <h4 class="sec-title">属性 properties</h4>
@@ -282,9 +295,9 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { useRoute, onBeforeRouteLeave } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Back } from '@element-plus/icons-vue'
 import { listProducts, getProductTsl, updateProductTsl, listDevices } from '../api'
 import { formatTime } from '../utils/export'
@@ -316,6 +329,56 @@ const tsl = computed(() => ({
   events: events.value,
   services: services.value
 }))
+
+// ===== 7.1 未保存改动提醒 =====
+// 物模型可能改了十几行，切个 tab / 点返回 / 刷新就全丢，而页面不会拦一下（评审 7.1）。
+// 脏判定用「载入快照 vs 当前状态」的 JSON 对比，而不是手动置 dirty 标志 ——
+// 手动标志要覆盖每个输入框的每种事件（输入/勾选/增删行/枚举弹窗…），漏一个就静默失效。
+const loadedSnapshot = ref('')
+
+const currentSnapshot = () => JSON.stringify({
+  properties: properties.value,
+  events: events.value,
+  services: services.value
+})
+
+const dirty = computed(() => loadedSnapshot.value !== '' && currentSnapshot() !== loadedSnapshot.value)
+
+const LEAVE_CONFIRM = {
+  type: 'warning',
+  confirmButtonText: '放弃修改并离开',
+  cancelButtonText: '留在本页',
+  confirmButtonClass: 'el-button--danger'
+}
+
+/** 用户确认放弃时返回 true。ElMessageBox 取消会 reject，必须捕获 */
+async function confirmLeave() {
+  try {
+    await ElMessageBox.confirm('物模型有未保存的改动，离开后本次修改将丢失。确定离开吗？', '有未保存的改动', LEAVE_CONFIRM)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 真正放弃修改：把三个数组还原到载入基线。
+ *
+ * 光"允许导航"是不够的 —— 用户点了「放弃修改并离开」后如果只是切了个 tab（人还在这个页面），
+ * 那些"已放弃"的改动仍留在内存里，切回物模型还能看到。**那按钮文案就成了假话。**
+ * （路由离开时组件会卸载，这里多跑一次也无害。）
+ */
+function discardChanges() {
+  if (!loadedSnapshot.value) return
+  try {
+    const s = JSON.parse(loadedSnapshot.value)
+    properties.value = s.properties || []
+    events.value = s.events || []
+    services.value = s.services || []
+  } catch {
+    // 快照解析失败就不动数据 —— 宁可留着改动，也别把表单清空
+  }
+}
 
 // 产品下设备
 const devices = ref([])
@@ -386,6 +449,10 @@ async function loadTsl(productKey) {
     properties.value = []
     events.value = []
     services.value = []
+  } finally {
+    // 7.1：无论成功还是失败都要重取基线 —— 放在 finally 里，
+    // 否则加载失败（三个数组被清空）会被判成"有未保存改动"，一进页面就弹提示
+    loadedSnapshot.value = currentSnapshot()
   }
 }
 
@@ -553,14 +620,47 @@ function handleDevicesPage(p) {
   loadDevices()
 }
 
-watch(activeTab, (tab) => {
+// 切换 tab：从「物模型」离开且有未保存改动 → 先确认（用户取消就把 tab 拨回去）
+let revertTab = false
+watch(activeTab, async (tab, prev) => {
+  if (revertTab) {
+    revertTab = false
+    return
+  }
+  // 7.1：只有「物模型」tab 是可编辑的，所以只拦"从它离开"
+  if (prev === 'tsl' && tab !== 'tsl' && dirty.value) {
+    if (!(await confirmLeave())) {
+      revertTab = true
+      activeTab.value = 'tsl'
+      return
+    }
+    discardChanges() // 用户选了「放弃修改」，就真的丢掉（否则切回来还能看到"已放弃"的改动）
+  }
   if (tab === 'devices') {
     devicesPage.value = 1
     loadDevices()
   }
 })
 
-onMounted(load)
+// 7.1：离开路由（含「返回」按钮）也要拦
+onBeforeRouteLeave(async () => {
+  if (!dirty.value) return true
+  return await confirmLeave()
+})
+
+// 7.1：刷新 / 关标签页。浏览器只允许弹它自己的通用提示，不能自定义文案 —— 有拦总比没有强
+function onBeforeUnload(e) {
+  if (!dirty.value) return
+  e.preventDefault()
+  e.returnValue = ''
+}
+
+onMounted(() => {
+  load()
+  window.addEventListener('beforeunload', onBeforeUnload)
+})
+
+onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload))
 </script>
 
 <style scoped>
@@ -609,6 +709,13 @@ onMounted(load)
   align-items: center;
   justify-content: space-between;
   margin-bottom: 4px;
+}
+
+/* 7.1：保存区 —— 「有未保存的改动」标签与保存按钮并排 */
+.tsl-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .tsl-title {

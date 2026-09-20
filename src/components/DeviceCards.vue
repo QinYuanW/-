@@ -1,5 +1,20 @@
 <template>
   <div class="dev-cards">
+    <!-- 4.4：卡片视图原先没有全选，要批量操作 20 台得一张张勾（表格视图有列头全选，
+         两个视图体验割裂）。这里补「本页全选 / 反选」。
+         注意选择范围就是**本页** —— 与 selection-change 只上报当前页勾选项的语义一致，
+         所以下方计数也用同一个口径，不会出现"显示已选 3 台、批量按钮却是 0 台"。 -->
+    <div v-if="devices.length" class="card-tools">
+      <el-checkbox
+        :model-value="allChecked"
+        :indeterminate="someChecked"
+        @change="toggleAll"
+      >
+        本页全选
+      </el-checkbox>
+      <span class="pick-count">已选 {{ checkedKeys.length }} 台</span>
+    </div>
+
     <div class="card-scroll">
       <div v-loading="loading" class="card-grid">
         <div
@@ -81,7 +96,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Connection } from '@element-plus/icons-vue'
 import { formatTime } from '../utils/export'
@@ -100,9 +115,22 @@ const emit = defineEmits(['select', 'page-change', 'size-change', 'selection-cha
 const router = useRouter()
 const checkedKeys = ref([])
 
+const pageKeys = computed(() => props.devices.map((d) => d.device_key))
+const allChecked = computed(() =>
+  pageKeys.value.length > 0 && pageKeys.value.every((k) => checkedKeys.value.includes(k))
+)
+const someChecked = computed(() =>
+  !allChecked.value && pageKeys.value.some((k) => checkedKeys.value.includes(k))
+)
+
 function productName(key) {
   const p = props.products.find((x) => x.product_key === key)
   return p ? p.name : key || '-'
+}
+
+/** 上报勾选项（只含当前页）—— 所有改动勾选的入口都走这里，避免各处口径不一 */
+function emitSelection() {
+  emit('selection-change', props.devices.filter((x) => checkedKeys.value.includes(x.device_key)))
 }
 
 function onCheck(d, v) {
@@ -110,8 +138,25 @@ function onCheck(d, v) {
   if (v) set.add(d.device_key)
   else set.delete(d.device_key)
   checkedKeys.value = [...set]
-  emit('selection-change', props.devices.filter((x) => checkedKeys.value.includes(x.device_key)))
+  emitSelection()
 }
+
+/** 4.4：本页全选 / 全不选 */
+function toggleAll(v) {
+  checkedKeys.value = v ? [...pageKeys.value] : []
+  emitSelection()
+}
+
+// 选择是"本页"范围的：翻页后把不在当前页的勾选剪掉。
+// 否则「已选 N 台」会把上一页的也算进来，而 selection-change 只上报当前页 —— 两者对不上，
+// 用户会看到"显示已选 3 台但批量按钮说 0 台"。
+watch(pageKeys, (keys) => {
+  const next = checkedKeys.value.filter((k) => keys.includes(k))
+  if (next.length !== checkedKeys.value.length) {
+    checkedKeys.value = next
+    emitSelection()
+  }
+})
 
 function goTelemetry(d) {
   router.push(`/devices/${d.device_key}?tab=telemetry`)
@@ -163,6 +208,21 @@ defineExpose({ clearSelection })
   gap: 14px;
   min-height: 0;
   flex: 1;
+}
+
+/* 4.4：本页全选工具条 —— 放在滚动区之外，滚到哪儿都在 */
+.card-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #eef1f6;
+  flex-shrink: 0;
+}
+
+.pick-count {
+  font-size: 12px;
+  color: #6b7280;
 }
 
 .card-scroll {

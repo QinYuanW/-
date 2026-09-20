@@ -14,12 +14,15 @@
         </el-form-item>
 
         <el-form-item label="产品" required>
+          <!-- 9.4：去掉 `allow-create` —— 设备必须挂在一个**已存在**的产品下，
+               允许手输任意 product_key 只可能输入错、然后在提交时吃一个"产品不存在"。
+               列表加载失败时给明确提示 + 重试，而不是留个能瞎输的口子。 -->
           <el-select
             v-model="form.product_key"
             filterable
-            allow-create
             default-first-option
-            placeholder="选择产品，或输入 product_key"
+            :loading="productsLoading"
+            placeholder="请选择产品"
             style="width: 100%"
           >
             <el-option
@@ -29,6 +32,13 @@
               :value="p.product_key"
             />
           </el-select>
+          <div v-if="productsFailed" class="product-warn">
+            产品列表加载失败，请
+            <el-button link type="primary" size="small" @click="loadProducts">重试</el-button>
+          </div>
+          <div v-else-if="!productsLoading && !products.length" class="product-warn">
+            还没有任何产品，请先到「产品」页创建一个
+          </div>
         </el-form-item>
 
         <template v-if="mode === 'single'">
@@ -106,7 +116,10 @@ const submitting = ref(false)
 const mode = ref('single')
 const products = ref([])
 const form = reactive({
-  product_key: 'p_demo_001',
+  // 9.3：不再写死演示产品 `p_demo_001` —— 换个环境或删掉该产品后，
+  // 它会变成一个"看不见的错值"（下拉显示为空、提交却带着它）。
+  // 现在留空，等产品列表加载后默认取第一项；列表为空就要求用户自己选。
+  product_key: '',
   device_key: '',
   device_name: '',
   name_prefix: '',
@@ -138,12 +151,26 @@ function exportSecrets() {
   ElMessage.success(`已导出 ${resultItems.value.length} 条凭据`)
 }
 
+// 9.4：产品列表的加载态与失败态 —— 失败时要明确告知并给重试，
+// 而不是留一个"能手输任意 product_key"的口子（那条路只会输入错）
+const productsLoading = ref(false)
+const productsFailed = ref(false)
+
 async function loadProducts() {
+  productsLoading.value = true
+  productsFailed.value = false
   try {
     const res = await listProducts()
     products.value = res.data.items || []
+    // 默认选第一项，省掉"每次都要手动选一下"的机械操作；已有值（如二次打开）不动
+    if (!form.product_key && products.value.length) {
+      form.product_key = products.value[0].product_key
+    }
   } catch (e) {
-    products.value = [] // 加载失败仍可手输 product_key（allow-create）
+    products.value = []
+    productsFailed.value = true
+  } finally {
+    productsLoading.value = false
   }
 }
 
@@ -228,6 +255,14 @@ defineExpose({ openDialog })
   margin-left: auto;
   font-size: 12px;
   color: #9ca3af;
+}
+
+/* 9.4：产品下拉的辅助提示（加载失败 / 一个产品都没有）——
+   替代原来"允许手输任意 key"的兜底：说清问题并给下一步动作 */
+.product-warn {
+  font-size: 12px;
+  color: #d97706;
+  line-height: 1.6;
 }
 
 .register-btn {
