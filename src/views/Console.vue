@@ -7,33 +7,30 @@
       </div>
     </div>
 
+    <!-- 4.3：这三张卡是「**当前筛选结果集**」的口径，不是全平台快照 —— 卡片必须跟随筛选。
+         旧实现拿**无筛选**的查询取数（listDevices(1,1) 等），于是筛出「离线 137 台」时
+         卡上还写着"在线 1013"，那不是重复而是**误导**；本改动已修，并顺手省掉 3 个白请求。
+         全平台的在线/离线/产品数请去仪表盘看 —— 两边从此不再说同一件事。 -->
     <div class="stats-bar">
       <div class="stat-card">
         <div class="stat-icon total"><el-icon><Connection /></el-icon></div>
         <div class="stat-body">
-          <div class="stat-num">{{ stats.total }}</div>
-          <div class="stat-label">设备总数</div>
+          <div class="stat-num">{{ total }}</div>
+          <div class="stat-label">{{ resultLabel }}</div>
         </div>
       </div>
-      <div class="stat-card">
+      <div class="stat-card" :class="{ muted: noBreakdown }">
         <div class="stat-icon online"><el-icon><CircleCheck /></el-icon></div>
         <div class="stat-body">
-          <div class="stat-num online-num">{{ stats.online }}</div>
-          <div class="stat-label">在线设备</div>
+          <div class="stat-num online-num">{{ numText(breakdown.online) }}</div>
+          <div class="stat-label">{{ noBreakdown ? '已按状态筛选' : '其中在线' }}</div>
         </div>
       </div>
-      <div class="stat-card">
+      <div class="stat-card" :class="{ muted: noBreakdown }">
         <div class="stat-icon offline"><el-icon><CircleClose /></el-icon></div>
         <div class="stat-body">
-          <div class="stat-num offline-num">{{ stats.offline }}</div>
-          <div class="stat-label">离线设备</div>
-        </div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon product"><el-icon><Goods /></el-icon></div>
-        <div class="stat-body">
-          <div class="stat-num">{{ stats.products }}</div>
-          <div class="stat-label">产品总数</div>
+          <div class="stat-num offline-num">{{ numText(breakdown.offline) }}</div>
+          <div class="stat-label">{{ noBreakdown ? '已按状态筛选' : '其中离线' }}</div>
         </div>
       </div>
     </div>
@@ -170,7 +167,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Plus, Operation, Download, Tickets, Grid, List } from '@element-plus/icons-vue'
@@ -205,7 +202,25 @@ const productKey = ref('')
 const groupFilter = ref(null)
 const selectedKeys = ref([])
 const viewMode = ref('card')
-const stats = ref({ total: 0, online: 0, offline: 0, products: 0 })
+// 4.3：结果集的在线/离线拆分（null = 不适用：已按状态筛选，或取数失败）
+const breakdown = ref({ online: null, offline: null })
+let breakdownKey = ''
+
+/** 是否有任何筛选生效（决定第一张卡叫「设备总数」还是「筛选结果」） */
+const hasFilter = computed(() => !!(
+  keyword.value.trim() || productKey.value || groupFilter.value !== null || statusFilter.value
+))
+
+/** 已按状态筛选时，在线/离线拆分必然一个为 0，没有展示意义 —— 置灰而不是硬摆一个 0 */
+const noBreakdown = computed(() => breakdown.value.online === null && breakdown.value.offline === null)
+
+const resultLabel = computed(() => {
+  if (statusFilter.value === 1) return '筛选结果 · 均为在线'
+  if (statusFilter.value === 2) return '筛选结果 · 均为离线'
+  return hasFilter.value ? '筛选结果' : '设备总数'
+})
+
+const numText = (v) => (v === null || v === undefined ? '—' : v)
 
 // E4：批量移入分组
 const moveDialogVisible = ref(false)
@@ -235,6 +250,7 @@ async function loadDevices() {
     devices.value = []
   } finally {
     loading.value = false
+    loadBreakdown() // 不 await：列表先渲染，统计随后补上
   }
 }
 
@@ -254,23 +270,32 @@ async function loadProducts() {
   }
 }
 
-// JetLinks/FastBee 式统计卡片：设备总数/在线/离线/产品数（复用现有分页接口取 total）
-async function loadStats() {
+/**
+ * 4.3：取「当前筛选结果集」的在线/离线拆分（结果集总数直接用 loadDevices 返回的 total）。
+ *
+ * ⚠️ key 里带上 `total` —— 它同时是「筛选变了」与「集合变了（增删设备）」的信号：
+ *   翻页不重复请求，而增删/移组后会自动重算，不必在每个改动点记得手动刷新统计。
+ * 代价：设备上下线不会即时反映在这里 —— 但设备列表本身也是快照，两者口径一致反而对
+ *   （实时性统一交给 4.5「列表接 WS 推送」解决）。
+ */
+async function loadBreakdown() {
+  const key = [keyword.value.trim(), productKey.value, groupFilter.value, statusFilter.value, total.value].join('|')
+  if (key === breakdownKey) return
+  breakdownKey = key
+
+  // 已按状态筛选：拆分必然一个为 0，连请求都省掉，直接标记不适用
+  if (statusFilter.value) {
+    breakdown.value = { online: null, offline: null }
+    return
+  }
   try {
-    const [all, online, offline, prods] = await Promise.all([
-      listDevices(1, 1),
-      listDevices(1, 1, '', '', 1),
-      listDevices(1, 1, '', '', 2),
-      listProducts()
+    const [on, off] = await Promise.all([
+      listDevices(1, 1, keyword.value, productKey.value, 1, groupFilter.value),
+      listDevices(1, 1, keyword.value, productKey.value, 2, groupFilter.value)
     ])
-    stats.value = {
-      total: all.data.total || 0,
-      online: online.data.total || 0,
-      offline: offline.data.total || 0,
-      products: (prods.data.items || []).length
-    }
+    breakdown.value = { online: on.data.total ?? 0, offline: off.data.total ?? 0 }
   } catch {
-    // 统计失败不阻塞页面
+    breakdown.value = { online: null, offline: null } // 统计失败不阻塞页面
   }
 }
 
@@ -479,7 +504,6 @@ onMounted(() => {
   loadDevices()
   loadProducts()
   loadGroups()
-  loadStats()
 })
 
 /**
@@ -550,7 +574,7 @@ onBeforeUnmount(() => clearTimeout(searchTimer))
 
 .stats-bar {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr); /* 4.3：产品数卡已删（与仪表盘重复且与设备页无关） */
   gap: 12px;
 }
 
@@ -562,6 +586,12 @@ onBeforeUnmount(() => clearTimeout(searchTimer))
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+/* 4.3：拆分不适用时（已按状态筛选）整卡淡化，而不是硬摆一个 0 ——
+   0 会被读成"这批里一台离线都没有"，而事实是"这个问题在当前筛选下没有意义" */
+.stat-card.muted {
+  opacity: 0.5;
 }
 
 .stat-icon {
@@ -586,10 +616,6 @@ onBeforeUnmount(() => clearTimeout(searchTimer))
 
 .stat-icon.offline {
   background: linear-gradient(135deg, #9ca3af, #6b7280);
-}
-
-.stat-icon.product {
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
 }
 
 .stat-num {
