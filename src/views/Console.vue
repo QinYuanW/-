@@ -10,7 +10,13 @@
     <!-- 4.3：这三张卡是「**当前筛选结果集**」的口径，不是全平台快照 —— 卡片必须跟随筛选。
          旧实现拿**无筛选**的查询取数（listDevices(1,1) 等），于是筛出「离线 137 台」时
          卡上还写着"在线 1013"，那不是重复而是**误导**；本改动已修，并顺手省掉 3 个白请求。
-         全平台的在线/离线/产品数请去仪表盘看 —— 两边从此不再说同一件事。 -->
+         全平台的在线/离线/产品数请去仪表盘看 —— 两边从此不再说同一件事。
+
+         ⚠️ 2026-09-20 二次修正：先前在「已按状态筛选」时把拆分卡置灰显示「—」，理由是
+         "拆分必然一个为 0、没意义"。**这个理由是错的**：筛「离线」时得到的是"在线 0 / 离线 N"，
+         那个 0 出现在「在线」卡上读起来完全正确（这批结果里在线 0 台），没有歧义；
+         而「—」反而让人以为功能坏了（实测就是这个反馈）。现在改为**照常显示数字**，
+         且因为拆分是确定的，连请求都不用发。 -->
     <div class="stats-bar">
       <div class="stat-card">
         <div class="stat-icon total"><el-icon><Connection /></el-icon></div>
@@ -19,18 +25,18 @@
           <div class="stat-label">{{ resultLabel }}</div>
         </div>
       </div>
-      <div class="stat-card" :class="{ muted: noBreakdown }">
+      <div class="stat-card" :class="{ muted: breakdownMissing }">
         <div class="stat-icon online"><el-icon><CircleCheck /></el-icon></div>
         <div class="stat-body">
           <div class="stat-num online-num">{{ numText(breakdown.online) }}</div>
-          <div class="stat-label">{{ noBreakdown ? '已按状态筛选' : '其中在线' }}</div>
+          <div class="stat-label">其中在线</div>
         </div>
       </div>
-      <div class="stat-card" :class="{ muted: noBreakdown }">
+      <div class="stat-card" :class="{ muted: breakdownMissing }">
         <div class="stat-icon offline"><el-icon><CircleClose /></el-icon></div>
         <div class="stat-body">
           <div class="stat-num offline-num">{{ numText(breakdown.offline) }}</div>
-          <div class="stat-label">{{ noBreakdown ? '已按状态筛选' : '其中离线' }}</div>
+          <div class="stat-label">其中离线</div>
         </div>
       </div>
     </div>
@@ -202,7 +208,7 @@ const productKey = ref('')
 const groupFilter = ref(null)
 const selectedKeys = ref([])
 const viewMode = ref('card')
-// 4.3：结果集的在线/离线拆分（null = 不适用：已按状态筛选，或取数失败）
+// 4.3：结果集的在线/离线拆分（null = 取数失败，此时显示「—」而不是假报一个 0）
 const breakdown = ref({ online: null, offline: null })
 let breakdownKey = ''
 
@@ -211,14 +217,10 @@ const hasFilter = computed(() => !!(
   keyword.value.trim() || productKey.value || groupFilter.value !== null || statusFilter.value
 ))
 
-/** 已按状态筛选时，在线/离线拆分必然一个为 0，没有展示意义 —— 置灰而不是硬摆一个 0 */
-const noBreakdown = computed(() => breakdown.value.online === null && breakdown.value.offline === null)
+/** 仅在取数失败时为真（用于把卡片淡化）—— 正常情况必须有数字，不要用「—」糊弄 */
+const breakdownMissing = computed(() => breakdown.value.online === null && breakdown.value.offline === null)
 
-const resultLabel = computed(() => {
-  if (statusFilter.value === 1) return '筛选结果 · 均为在线'
-  if (statusFilter.value === 2) return '筛选结果 · 均为离线'
-  return hasFilter.value ? '筛选结果' : '设备总数'
-})
+const resultLabel = computed(() => (hasFilter.value ? '筛选结果' : '设备总数'))
 
 const numText = (v) => (v === null || v === undefined ? '—' : v)
 
@@ -283,9 +285,14 @@ async function loadBreakdown() {
   if (key === breakdownKey) return
   breakdownKey = key
 
-  // 已按状态筛选：拆分必然一个为 0，连请求都省掉，直接标记不适用
-  if (statusFilter.value) {
-    breakdown.value = { online: null, offline: null }
+  // 已按状态筛选时拆分是**确定的**，连请求都不用发：
+  //   筛「离线」→ 结果集全离线，于是 在线 0 / 离线 total；筛「在线」反之。
+  if (statusFilter.value === 1) {
+    breakdown.value = { online: total.value, offline: 0 }
+    return
+  }
+  if (statusFilter.value === 2) {
+    breakdown.value = { online: 0, offline: total.value }
     return
   }
   try {
@@ -295,7 +302,7 @@ async function loadBreakdown() {
     ])
     breakdown.value = { online: on.data.total ?? 0, offline: off.data.total ?? 0 }
   } catch {
-    breakdown.value = { online: null, offline: null } // 统计失败不阻塞页面
+    breakdown.value = { online: null, offline: null } // 统计失败不阻塞页面，卡片显示「—」
   }
 }
 
@@ -588,8 +595,8 @@ onBeforeUnmount(() => clearTimeout(searchTimer))
   gap: 12px;
 }
 
-/* 4.3：拆分不适用时（已按状态筛选）整卡淡化，而不是硬摆一个 0 ——
-   0 会被读成"这批里一台离线都没有"，而事实是"这个问题在当前筛选下没有意义" */
+/* 仅在统计取数失败时淡化（数字显示「—」）—— 正常情况必须有数字，
+   拿「—」糊弄会让人以为功能坏了（2026-09-20 实测反馈） */
 .stat-card.muted {
   opacity: 0.5;
 }
