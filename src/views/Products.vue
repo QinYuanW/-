@@ -89,10 +89,21 @@
         <el-form-item label="产品名称" required>
           <el-input v-model="createForm.name" placeholder="如：CO2 传感器" />
         </el-form-item>
-        <el-form-item label="product_key">
-          <el-input v-model="createForm.product_key" placeholder="留空自动生成 p_xxxxxxxx" />
-        </el-form-item>
-      </el-form>
+          <el-form-item label="product_key">
+            <el-input v-model="createForm.product_key" placeholder="留空自动生成 p_xxxxxxxx" />
+          </el-form-item>
+          <!-- 通用物模型：创建时就能带上属性/事件/服务，省掉"先建空产品 → 进详情 → 再套模板"三步 -->
+          <el-form-item label="初始物模型">
+            <el-select v-model="createForm.template_id" placeholder="留空 = 空白物模型" clearable style="width: 100%">
+              <el-option
+                v-for="t in TSL_TEMPLATES"
+                :key="t.id"
+                :value="t.id"
+                :label="t.name + '（' + templateSummary(t) + '）'"
+              />
+            </el-select>
+          </el-form-item>
+        </el-form>
       <template #footer>
         <el-button @click="createVisible = false">取消</el-button>
         <el-button type="primary" :loading="creating" @click="doCreate">创建</el-button>
@@ -156,6 +167,7 @@ import {
   listDevices
 } from '../api'
 import { formatTime } from '../utils/export'
+import { TSL_TEMPLATES, templateSummary, findTemplate, cloneTsl } from '../constants/tslTemplates'
 
 const router = useRouter()
 
@@ -170,7 +182,7 @@ const productSearch = ref('')
 
 const createVisible = ref(false)
 const creating = ref(false)
-const createForm = reactive({ name: '', product_key: '' })
+const createForm = reactive({ name: '', product_key: '', template_id: '' })
 
 const filteredProducts = computed(() => {
   const kw = productSearch.value.trim().toLowerCase()
@@ -356,31 +368,40 @@ async function askDelete(p) {
   }
 }
 
-function openCreate() {
-  createForm.name = ''
-  createForm.product_key = ''
-  createVisible.value = true
-}
+  function openCreate() {
+    createForm.name = ''
+    createForm.product_key = ''
+    createForm.template_id = ''
+    createVisible.value = true
+  }
 
-async function doCreate() {
-  if (!createForm.name.trim()) {
-    ElMessage.warning('请填写产品名称')
-    return
+  async function doCreate() {
+    if (!createForm.name.trim()) {
+      ElMessage.warning('请填写产品名称')
+      return
+    }
+    creating.value = true
+    try {
+      const payload = { name: createForm.name.trim() }
+      if (createForm.product_key.trim()) payload.product_key = createForm.product_key.trim()
+      // 选了通用物模型就一并带上（后端 POST /products 本来就接受 tsl）——
+      // 省掉"先建空产品 → 进详情 → 再套模板"三步
+      const tpl = createForm.template_id ? findTemplate(createForm.template_id) : null
+      if (tpl) payload.tsl = cloneTsl(tpl.tsl)
+      const res = await createProduct(payload)
+      ElMessage.success(
+        tpl
+          ? `产品 ${res.data.product_key} 已创建（含「${tpl.name}」物模型）`
+          : `产品 ${res.data.product_key} 已创建`
+      )
+      createVisible.value = false
+      await load()
+    } catch (e) {
+      // 拦截器已提示
+    } finally {
+      creating.value = false
+    }
   }
-  creating.value = true
-  try {
-    const payload = { name: createForm.name.trim() }
-    if (createForm.product_key.trim()) payload.product_key = createForm.product_key.trim()
-    const res = await createProduct(payload)
-    ElMessage.success(`产品 ${res.data.product_key} 已创建`)
-    createVisible.value = false
-    await load()
-  } catch (e) {
-    // 拦截器已提示
-  } finally {
-    creating.value = false
-  }
-}
 
 onMounted(load)
 </script>

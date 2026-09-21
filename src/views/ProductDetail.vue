@@ -44,6 +44,9 @@
               </el-radio-group>
             </div>
             <div class="tsl-actions">
+              <!-- 通用物模型：从内置模板一键生成常见设备的属性/事件/服务，
+                   省掉"手敲十几个 key"的过程。与「导入」一样，只填编辑区，仍需点保存才落库。 -->
+              <el-button size="small" :icon="MagicStick" @click="tplRef?.open()">套用模板</el-button>
               <!-- 7.4：TSL 导入/导出 —— 把物模型复制到另一个产品原先只能手敲 -->
               <el-button size="small" :icon="Download" @click="exportTsl">导出</el-button>
               <el-button size="small" :icon="Upload" @click="openImport">导入</el-button>
@@ -330,6 +333,8 @@
         <el-button type="primary" @click="doImport">导入</el-button>
       </template>
     </el-dialog>
+    <!-- 通用物模型模板选择（只把结果交给编辑区，不直接落库） -->
+    <TslTemplateDialog ref="tplRef" @apply="onTemplateApply" />
   </div>
 </template>
 
@@ -337,9 +342,11 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Back, Download, Upload } from '@element-plus/icons-vue'
+import { Back, Download, Upload, MagicStick } from '@element-plus/icons-vue'
 import { listProducts, getProductTsl, updateProductTsl, listDevices } from '../api'
 import { formatTime } from '../utils/export'
+import { mergeTsl } from '../constants/tslTemplates'
+import TslTemplateDialog from '../components/TslTemplateDialog.vue'
 
 const route = useRoute()
 const key = computed(() => route.params.key)
@@ -371,6 +378,35 @@ const services = ref([])
  * 也不影响任何按 DOM 计算的逻辑（保存校验读的是 state 不是 DOM）。
  */
 const tslSection = ref('properties')
+
+// ===== 通用物模型模板 =====
+const tplRef = ref()
+
+/**
+ * 套用模板到**编辑区**（与「导入」同一条路径：不直接落库，点保存才生效）。
+ *
+ * 为什么不直接落库：模板是"起点"不是"终点"——用户套完几乎总要改两个 key/量程，
+ * 直接写库会让人以为"一按就改完并生效了"，改完忘了保存还更难发现。
+ */
+function onTemplateApply({ tsl: tplTsl, mode, templateName }) {
+  const merged = mergeTsl(
+    { properties: properties.value, events: events.value, services: services.value },
+    tplTsl,
+    mode
+  )
+  properties.value = merged.properties
+  events.value = merged.events
+  services.value = merged.services
+  // 跳到有内容的那一段，让用户立刻看到结果
+  tslSection.value = merged.properties.length
+    ? 'properties'
+    : (merged.events.length ? 'events' : 'services')
+  ElMessage.success(
+    mode === 'replace'
+      ? `已套用「${templateName}」（${merged.added} 项），点「保存物模型」才会落库`
+      : `已追加 ${merged.added} 项、跳过同名 ${merged.skipped} 项，点「保存物模型」才会落库`
+  )
+}
 
 // ===== 7.4 TSL 导入 / 导出 =====
 const importVisible = ref(false)

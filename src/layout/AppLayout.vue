@@ -21,6 +21,12 @@
             <el-icon><Goods /></el-icon>
             <span>产品</span>
           </el-menu-item>
+          <!-- 通用物模型：模板库（浏览 + 一键套用到产品）。
+               放「产品」旁边：用户建产品时最需要它，而不是先点进某个产品再找。 -->
+          <el-menu-item index="/tsl-templates">
+            <el-icon><Collection /></el-icon>
+            <span>物模型</span>
+          </el-menu-item>
           <el-menu-item index="/">
             <el-icon><Odometer /></el-icon>
             <span>设备</span>

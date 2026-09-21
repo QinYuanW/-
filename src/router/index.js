@@ -32,6 +32,15 @@ const routes = [
         meta: { title: '产品详情', crumb: ['设备管理', '产品详情'], menu: '/products' }
       },
       {
+        // 通用物模型：浏览内置模板 + 一键套用到产品。
+        // 放在「设备管理」下而不是塞进产品详情 —— 它的**主语是模板不是某个产品**，
+        // 用户想的是"我要一个温湿度模型"，不该先选产品再找入口。
+        path: 'tsl-templates',
+        name: 'tsl-templates',
+        component: () => import('../views/TslTemplates.vue'),
+        meta: { title: '物模型', crumb: ['设备管理', '物模型'] }
+      },
+      {
         path: '',
         name: 'console',
         component: () => import('../views/Console.vue'),
