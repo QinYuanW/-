@@ -22,7 +22,10 @@ http.interceptors.response.use(
       // silentError：把提示交给调用方自己呈现（如登录页要在表单内联显示错误）——
       // 否则同一个错误既飘 toast 又出现在表单里，噪音翻倍，用户还会以为错了两次
       if (!res.config?.silentError) ElMessage.error(body.message || '请求失败')
-      if (body.code === 4010) {
+      // ⚠️ 4010 在本项目里是「鉴权失败」的笼统码，这里按"会话失效"处理（清 token + 跳登录页）。
+      // 但**有些接口的 4010 与会话无关**（如改密码时"原密码不正确"），
+      // 那种情况把用户踢出去是错的 —— 这类接口显式声明 noAuthRedirect，把错误交给调用方。
+      if (body.code === 4010 && !res.config?.noAuthRedirect) {
         localStorage.removeItem('iot_token')
         router.push('/login')
       }
@@ -59,9 +62,14 @@ export const login = (username, password, rememberMe = false) =>
  * 修改密码（评审 1.4）。
  *
  * <p>用户名由后端从 token 取（不从请求体传），所以这里只需要原密码 + 新密码。
+ *
+ * <p>`noAuthRedirect`：「原密码不正确」这类错误**与"会话失效"无关**，
+ * 不该触发全局登出（实测：会把用户连同整个应用一起踢回登录页）。
  */
 export const changePassword = (oldPassword, newPassword) =>
-  http.put('/users/password', { old_password: oldPassword, new_password: newPassword })
+  http.put('/users/password',
+    { old_password: oldPassword, new_password: newPassword },
+    { noAuthRedirect: true })
 
 /**
  * 设备列表。
