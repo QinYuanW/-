@@ -107,3 +107,10 @@ management:
   metrics:
     tags:
       application: ${spring.application.name}
+    # B3 大盘「接口耗时 P95 by URI」需要 `http_server_requests_seconds_bucket`，
+    # 而 Micrometer 默认**不导出** HTTP 请求的直方图桶（只给 _count/_sum/_max）——
+    # 于是那块面板一直是 No data（且很容易被当成"最近没流量"）。实测确认过：
+    # 未开时 /actuator/prometheus 里没有任何 http_server_requests_seconds_bucket。
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
