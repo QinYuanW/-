@@ -384,13 +384,16 @@ const fileRef = ref()
 function exportTsl() {
   const { tsl: t } = buildTsl()
   const blob = new Blob([JSON.stringify(t, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
+  a.href = url
   a.download = `${key.value}-tsl.json`
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
-  URL.revokeObjectURL(a.href)
+  // 延迟释放：紧跟着 click 就 revoke 有概率让下载"刚发起就被取消"
+  // （headless 下必现：CDP 事件是 willBegin → canceled）。等浏览器真正接手再释放。
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 function openImport() {
