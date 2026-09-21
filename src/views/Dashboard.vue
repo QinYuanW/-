@@ -63,7 +63,16 @@
 
     <div class="mid-grid">
       <section id="panel-message" class="panel">
-        <div class="panel-title">设备消息</div>
+        <div class="panel-title with-switch">
+          设备消息
+          <!-- 3.5：后端 /stats/message-trend 本来就支持 granularity + range，
+               之前前端只用了默认的 day/30 —— 用户没有任何切换入口 -->
+          <el-radio-group v-model="trendRange" size="small" @change="reloadTrend">
+            <el-radio-button v-for="r in TREND_RANGES" :key="r.value" :value="r.value">
+              {{ r.label }}
+            </el-radio-button>
+          </el-radio-group>
+        </div>
         <div ref="trendEl" class="trend-chart"></div>
       </section>
 
@@ -420,22 +429,60 @@ function onResize() {
   typeChart && typeChart.resize()
 }
 
+/**
+ * 3.5：趋势图时间范围。
+ *
+ * <p>后端 `/stats/message-trend` 本来就支持 `granularity`（day/month）+ `range`
+ * （day 传天数、month 传月数），只是前端一直只用默认的 `day/30` —— 用户没有任何切换入口。
+ * 所以这里**是纯前端补齐，不用改后端**。
+ */
+const TREND_RANGES = [
+  { value: '7d', label: '近 7 天', granularity: 'day', range: 7 },
+  { value: '30d', label: '近 30 天', granularity: 'day', range: 30 },
+  { value: '90d', label: '近 90 天', granularity: 'day', range: 90 },
+  { value: '12m', label: '近 12 个月', granularity: 'month', range: 12 }
+]
+const trendRange = ref('30d')
+const trendParams = () =>
+  TREND_RANGES.find((r) => r.value === trendRange.value) || TREND_RANGES[1]
+
+/**
+ * 把趋势响应塞进图表数据。
+ * 后端只返回「有数据的桶」；X 轴标签：日桶 `YYYY-MM-DD` 截成 `MM-DD`，月桶 `YYYY-MM` 原样。
+ */
+function applyTrend(data) {
+  const items = data?.items || []
+  messageTrend.months = items.map((i) => (i.bucket && i.bucket.length === 10 ? i.bucket.slice(5) : i.bucket))
+  messageTrend.message = items.map((i) => i.message)
+  messageTrend.warn = items.map((i) => i.alarm)
+  trendReady.value = true
+}
+
+/** 切换范围：只重取趋势 + 重绘这一张图，不惊动其它面板（也不触发产品概览那 N 个请求） */
+async function reloadTrend() {
+  try {
+    const r = trendParams()
+    const res = await getMessageTrend(r.granularity, r.range)
+    applyTrend(res.data)
+    await nextTick()
+    initTrend()
+  } catch (e) {
+    // 拦截器已提示
+  }
+}
+
 async function loadDashboard({ silent = false } = {}) {
   if (!silent) loading.value = true
   try {
+    const r = trendParams()
     const [ov, trend, alarms] = await Promise.all([
       getStatsOverview(),
-      getMessageTrend('day', 30),
+      getMessageTrend(r.granularity, r.range),
       listAlerts(1, 10)
     ])
 
     Object.assign(overview, ov.data)
-
-    // 趋势：后端只返回「有数据的桶」，X 轴标签截成 MM-DD 便于阅读
-    const items = trend.data?.items || []
-    messageTrend.months = items.map((i) => (i.bucket?.length === 10 ? i.bucket.slice(5) : i.bucket))
-    messageTrend.message = items.map((i) => i.message)
-    messageTrend.warn = items.map((i) => i.alarm)
+    applyTrend(trend.data)
 
     // 告警：后端字段为 snake_case，表格按 camelCase 绑定，这里做一次映射
     alarmList.value = (alarms.data?.items || []).map((a) => ({
@@ -717,6 +764,15 @@ onBeforeUnmount(() => {
   font-weight: 600;
   color: #1f2937;
   margin-bottom: 12px;
+}
+
+/* 3.5：带范围切换的标题 —— 标题左、切换器右 */
+.panel-title.with-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .trend-chart {

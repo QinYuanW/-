@@ -179,25 +179,9 @@ function openDialog() {
   loadProducts()
 }
 
-// 3.3 批次列表：批量注册成功后把批次信息写入本地记录（后端未建批次表）
-function saveBatchRecord(items) {
-  const keys = (items || []).map((i) => i.device_key)
-  const record = {
-    id: Date.now(),
-    time: new Date().toLocaleString('zh-CN', { hour12: false }),
-    product_key: form.product_key.trim(),
-    name_prefix: form.name_prefix.trim() || 'dev',
-    count: keys.length,
-    keys
-  }
-  try {
-    const list = JSON.parse(localStorage.getItem('iot_batch_records') || '[]')
-    list.unshift(record)
-    localStorage.setItem('iot_batch_records', JSON.stringify(list.slice(0, 50)))
-  } catch (e) {
-    // 本地记录写失败不影响注册主流程
-  }
-}
+// 4.7：批次记录不再写 localStorage ——
+// 后端 `GET /devices/batches` 直接从设备表推导（device_key = 前缀_时间戳_序号），
+// 换浏览器/清缓存都不会"看起来丢了数据"。前端不再需要任何本地记账。
 
 async function submit() {
   if (!form.product_key.trim()) {
@@ -223,7 +207,7 @@ async function submit() {
     resultItems.value = items
     dialogVisible.value = false
     resultVisible.value = true
-    if (mode.value === 'batch') saveBatchRecord(items)
+
     emit('registered')
   } catch (e) {
     // 错误提示已由 axios 拦截器统一处理

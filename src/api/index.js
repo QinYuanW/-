@@ -87,6 +87,16 @@ export const listDevices = (
 export const renameDevice = (deviceKey, deviceName) =>
   http.put(`/devices/${deviceKey}`, { device_name: deviceName })
 
+/**
+ * 4.7：注册批次列表。
+ *
+ * 由后端从**设备表推导**（device_key 形如 `<前缀>_<yyyyMMddHHmmss>_<序号>`），
+ * 不再依赖浏览器 localStorage —— 换浏览器/清缓存不会"看起来丢了数据"。
+ * 返回 {batches, ungrouped, deviceTotal}。
+ */
+export const listBatches = (limit = 50) =>
+  http.get('/devices/batches', { params: { limit } })
+
 // ===== 3.3 设备列表增强 =====
 
 export const deleteDevices = (deviceKeys) =>
