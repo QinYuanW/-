@@ -56,11 +56,16 @@ public class UserServiceImpl implements UserService {
         User user = userMapper.selectOne(
                 new LambdaQueryWrapper<User>().eq(User::getUsername, username));
         if (user == null) {
-            throw new BizException(ErrorCode.AUTH_FAILED, "用户不存在");
+            throw new BizException(ErrorCode.PARAM_ERROR, "用户不存在");
         }
         // 校验旧密码：这是本接口唯一一道确认（票据无状态，无法靠会话二次验证）
+        //
+        // ⚠️ 这里**不能用 AUTH_FAILED(4010)**：前端把 4010 定义为「会话失效」，
+        // 会清 token 并跳登录页 —— 于是"原密码输错"会把用户**直接踢出整个应用**
+        // （端到端实测复现：弹窗连同整个布局一起消失、跳回登录页）。
+        // **4010 只留给"会话/凭证失效"；用户输入类失败一律用 PARAM_ERROR。**
         if (!passwordEncoder.matches(oldPassword, user.getPasswordHash())) {
-            throw new BizException(ErrorCode.AUTH_FAILED, "原密码不正确");
+            throw new BizException(ErrorCode.PARAM_ERROR, "原密码不正确");
         }
         userMapper.update(null, new LambdaUpdateWrapper<User>()
                 .eq(User::getId, user.getId())
