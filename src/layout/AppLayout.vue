@@ -52,8 +52,10 @@
     <el-container class="app-body">
       <el-header height="56px" class="app-header">
           <div class="header-left">
+            <!-- 1.1：原先固定渲染「首页 / 设备管理 / xxx」——「首页」既不可点也没信息量，
+                 而且全站都在设备管理下，两级前缀把顶栏一半空间吃掉了。
+                 现在只渲染 meta.crumb（如「设备管理 / 设备」），层级仍在但不啰嗦。 -->
             <el-breadcrumb separator="/" class="app-crumb">
-              <el-breadcrumb-item>首页</el-breadcrumb-item>
               <el-breadcrumb-item v-for="c in crumbs" :key="c">{{ c }}</el-breadcrumb-item>
             </el-breadcrumb>
             <!-- 1.3：窄屏把面包屑整个 display:none 掉，而 ≤900px 侧栏又只剩图标 ——
@@ -62,25 +64,60 @@
                  （返回上层的入口由各详情页自己的「返回」按钮承担） -->
             <span class="crumb-compact">{{ compactTitle }}</span>
           </div>
-        <div class="header-right">
-          <span class="user">
-            <el-icon><UserFilled /></el-icon>
-            {{ username }}
-          </span>
-          <el-button text @click="handleLogout">退出登录</el-button>
-        </div>
+          <div class="header-right">
+            <!-- 1.4：原先只有「用户名 + 退出登录」，没有用户菜单（改密码 / 退出）。
+                 用下拉把账号相关的动作收在一处，别在顶栏铺一排按钮。 -->
+            <el-dropdown trigger="click" @command="onUserCommand">
+              <span class="user user-trigger">
+                <el-icon><UserFilled /></el-icon>
+                <span>{{ username }}</span>
+                <el-icon class="caret"><ArrowDown /></el-icon>
+              </span>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item disabled>当前账号：{{ username }}</el-dropdown-item>
+                  <el-dropdown-item command="password" divided>修改密码</el-dropdown-item>
+                  <el-dropdown-item command="logout">退出登录</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </div>
       </el-header>
       <el-main class="app-main">
         <router-view />
       </el-main>
     </el-container>
+
+    <!-- 1.4：修改密码 -->
+    <el-dialog v-model="pwdVisible" title="修改密码" width="440px">
+      <el-form ref="pwdFormRef" :model="pwdForm" :rules="pwdRules" label-width="86px">
+        <el-form-item label="原密码" prop="old_password">
+          <el-input v-model="pwdForm.old_password" type="password" show-password autocomplete="current-password" />
+        </el-form-item>
+        <el-form-item label="新密码" prop="new_password">
+          <el-input v-model="pwdForm.new_password" type="password" show-password autocomplete="new-password" />
+        </el-form-item>
+        <el-form-item label="确认新密码" prop="confirm">
+          <el-input v-model="pwdForm.confirm" type="password" show-password autocomplete="new-password" @keyup.enter="doChangePassword" />
+        </el-form-item>
+      </el-form>
+      <div class="pwd-tip">
+        改完密码后当前登录不会掉线（token 是无状态的，服务端无法撤销已签发的票据）——
+        下次登录请用新密码。
+      </div>
+      <template #footer>
+        <el-button @click="pwdVisible = false">取消</el-button>
+        <el-button type="primary" :loading="savingPwd" @click="doChangePassword">保存</el-button>
+      </template>
+    </el-dialog>
   </el-container>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { ref, reactive, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { changePassword } from '../api'
 
 const route = useRoute()
 const router = useRouter()
@@ -116,6 +153,60 @@ async function handleLogout() {
   localStorage.removeItem('iot_token')
   localStorage.removeItem('iot_username')
   router.push('/login')
+}
+
+// ===== 1.4 用户菜单 / 修改密码 =====
+const pwdVisible = ref(false)
+const savingPwd = ref(false)
+const pwdFormRef = ref()
+const pwdForm = reactive({ old_password: '', new_password: '', confirm: '' })
+
+const pwdRules = {
+  old_password: [{ required: true, message: '请输入原密码', trigger: 'blur' }],
+  new_password: [
+    { required: true, message: '请输入新密码', trigger: 'blur' },
+    { min: 6, message: '新密码至少 6 位', trigger: 'blur' }
+  ],
+  confirm: [
+    { required: true, message: '请再次输入新密码', trigger: 'blur' },
+    {
+      // 前端只做"两次输入一致"的即时反馈；真正的强度/原密码校验在后端
+      validator: (rule, value, cb) => {
+        if (value !== pwdForm.new_password) cb(new Error('两次输入的新密码不一致'))
+        else cb()
+      },
+      trigger: 'blur'
+    }
+  ]
+}
+
+function onUserCommand(cmd) {
+  if (cmd === 'password') {
+    pwdForm.old_password = ''
+    pwdForm.new_password = ''
+    pwdForm.confirm = ''
+    pwdVisible.value = true
+  } else if (cmd === 'logout') {
+    handleLogout()
+  }
+}
+
+async function doChangePassword() {
+  try {
+    await pwdFormRef.value.validate()
+  } catch {
+    return   // 校验失败：Element 已在表单内联提示
+  }
+  savingPwd.value = true
+  try {
+    await changePassword(pwdForm.old_password, pwdForm.new_password)
+    pwdVisible.value = false
+    ElMessage.success('密码已修改，下次登录请使用新密码')
+  } catch (e) {
+    // 拦截器已提示（原密码错误 / 新密码太短 等）
+  } finally {
+    savingPwd.value = false
+  }
 }
 </script>
 
@@ -256,6 +347,32 @@ async function handleLogout() {
   gap: 6px;
   font-size: 13px;
   color: #4b5563;
+}
+
+/* 1.4：用户名变成可点下拉 —— 给它 hover/cursor 反馈，否则用户不知道能点 */
+.user-trigger {
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  outline: none;
+  transition: background 0.15s;
+}
+
+.user-trigger:hover {
+  background: #f3f6fb;
+}
+
+.user-trigger .caret {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+/* 1.4：改密码弹窗里的说明 */
+.pwd-tip {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.7;
+  margin-top: 4px;
 }
 
 .app-main {

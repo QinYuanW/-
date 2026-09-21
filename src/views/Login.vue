@@ -32,6 +32,11 @@
           />
         </el-form-item>
 
+        <!-- 2.6：记住我 —— 勾选则后端签发 7 天有效期（默认只有 2 小时，频繁被踢回登录页） -->
+        <div class="remember-row">
+          <el-checkbox v-model="form.remember">记住我（7 天内免登录）</el-checkbox>
+        </div>
+
         <!-- 2.2：登录失败内联显示 —— 用户视线在表单上，错误飘到屏幕右上角的 toast 里是找不到的 -->
         <el-alert
           v-if="loginError"
@@ -69,8 +74,22 @@ import { login } from '../api'
 const router = useRouter()
 const formRef = ref()
 const loading = ref(false)
-// 2.3：用户名留空（原先预填 'admin' —— 与真实产品行为不符，还暗示了默认凭据）
-const form = reactive({ username: '', password: '' })
+/**
+ * 「记住我」记住的用户名，**必须用独立的 key**。
+ *
+ * ⚠️ 一开始我复用了 `iot_username`，结果永远记不住 —— 因为顶栏的「退出登录」
+ * 会 removeItem('iot_username')，一退出就把要记的东西自己清掉了。
+ * `iot_username` 是**当前会话**的用户名，`iot_remember_user` 是**用户显式同意记住**的用户名，
+ * 两者生命周期不同，不能共用一个 key。
+ */
+const REMEMBER_KEY = 'iot_remember_user'
+
+/** 上次是否勾了「记住我」（勾过才有值）——这是用户显式同意过的，不违反 2.3 的"不预填" */
+const rememberedUser = localStorage.getItem(REMEMBER_KEY) || ''
+
+// 2.3：用户名不预填 admin（与真实产品行为不符，还暗示了默认凭据）；
+// 只有用户自己勾过「记住我」才回填他上次的用户名
+const form = reactive({ username: rememberedUser, password: '', remember: rememberedUser !== '' })
 // 2.2：登录失败的内联错误
 const loginError = ref('')
 
@@ -91,9 +110,13 @@ async function handleLogin() {
   loading.value = true
   loginError.value = ''
   try {
-    const res = await login(form.username, form.password)
+    const res = await login(form.username, form.password, form.remember)
     localStorage.setItem('iot_token', res.data.token)
     localStorage.setItem('iot_username', res.data.username)
+    // 2.6：勾了就记住用户名，没勾就清掉 —— 不然下次又被带回来，等于偷偷预填。
+    // 注意写的是 REMEMBER_KEY 而不是 iot_username（后者会被「退出登录」清掉）
+    if (form.remember) localStorage.setItem(REMEMBER_KEY, form.username)
+    else localStorage.removeItem(REMEMBER_KEY)
     ElMessage.success('登录成功')
     router.push('/')
   } catch (e) {
@@ -136,6 +159,13 @@ async function handleLogin() {
 /* 2.2：登录失败的内联提示 —— 紧贴表单，别让用户去屏幕角落找错误 */
 .login-error {
   margin-bottom: 14px;
+}
+
+/* 2.6：记住我 —— 右对齐，与下面的主按钮形成"次要选项在上、主操作在下"的层次 */
+.remember-row {
+  display: flex;
+  justify-content: flex-end;
+  margin: -4px 0 14px;
 }
 
 .logo-box {

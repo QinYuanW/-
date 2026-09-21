@@ -48,9 +48,20 @@ http.interceptors.response.use(
  * <p>`silentError`：登录失败要**内联显示在密码框下方**（评审 2.2）——
  * 用户视线在表单上，错误却飘在屏幕右上角是找不到的。所以这里关掉全局 toast，
  * 由 Login.vue 自己渲染错误（它还会在网络异常时给一句兜底文案）。
+ *
+ * <p>`remember_me`（评审 2.6）：勾选则由后端签发更长有效期的 token
+ * （`jwt.remember-expire`，默认 7 天），否则仍是默认 2 小时。
  */
-export const login = (username, password) =>
-  http.post('/login', { username, password }, { silentError: true })
+export const login = (username, password, rememberMe = false) =>
+  http.post('/login', { username, password, remember_me: rememberMe }, { silentError: true })
+
+/**
+ * 修改密码（评审 1.4）。
+ *
+ * <p>用户名由后端从 token 取（不从请求体传），所以这里只需要原密码 + 新密码。
+ */
+export const changePassword = (oldPassword, newPassword) =>
+  http.put('/users/password', { old_password: oldPassword, new_password: newPassword })
 
 /**
  * 设备列表。
