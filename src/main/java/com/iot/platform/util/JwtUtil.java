@@ -23,8 +23,18 @@ public class JwtUtil {
 
         /** 生成 JWT 生成 token */
            public String generate(String username, Long userId, Integer role) {
+        return generate(username, userId, role, jwtProperties.getExpire());
+    }
+
+    /**
+     * 生成 token 并指定有效期（秒）。
+     *
+     * <p>评审 2.6「记住我」用这个重载签发更长有效期的 token；
+     * 保留原方法是为了不动其它调用方（默认 2 小时）。
+     */
+    public String generate(String username, Long userId, Integer role, long expireSeconds) {
         Date now = new Date();
-        Date expiry = new Date(now.getTime() + jwtProperties.getExpire() * 1000L);
+        Date expiry = new Date(now.getTime() + expireSeconds * 1000L);
         return Jwts.builder()
                 .subject(username)
                 .claim("uid", userId)
