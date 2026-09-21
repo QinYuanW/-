@@ -80,6 +80,17 @@ public class DeviceController {
         return Result.ok(Map.of("affected", affected));
     }
 
+    /**
+     * 评审 4.7：注册批次列表（从设备表推导，不再依赖前端 localStorage）。
+     *
+     * <p>返回 {@code {batches, ungrouped, deviceTotal}} —— ungrouped 是"不按批次命名规律
+     * 注册的设备数"，如实给出以免用户看到台数对不上时无从解释。
+     */
+    @GetMapping("/devices/batches")
+    public Result<Map<String, Object>> batches(@RequestParam(defaultValue = "50") int limit) {
+        return Result.ok(deviceService.listBatches(limit));
+    }
+
     /** 3.3 批量删除设备：body {"device_keys": ["dev_xxx", ...]} */
     @DeleteMapping("/devices")
     public Result<Map<String, Object>> deleteBatch(@RequestBody Map<String, List<String>> body) {

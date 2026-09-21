@@ -40,6 +40,25 @@ public interface DeviceService {
     boolean renameDevice(String deviceKey, String deviceName);
 
     /**
+     * 注册批次列表（评审 4.7）。
+     *
+     * <p><b>为什么是"推导"而不是"记录"</b>：批量注册生成的 device_key 形如
+     * {@code <前缀>_<yyyyMMddHHmmss>_<序号>}，批次信息本身就编码在 key 里；
+     * 而设备表是唯一权威来源。此前前端把批次记在 localStorage，换浏览器 / 清缓存即丢，
+     * 用户会以为"系统把数据弄丢了" —— 而设备其实好好的在库里。
+     *
+     * <p>推导还有一个附带好处：**永远与现实一致**。批次里的某台设备被删掉后，
+     * 这里显示的台数会跟着变；而本地记录只记"当时注册了 N 台"，之后就对不上了。
+     *
+     * <p>不匹配该命名规律的设备（手工指定 key 注册的）不会出现在批次里，
+     * 其数量通过返回值的 {@code ungrouped} 如实告知，避免"数量对不上却不知道为什么"。
+     *
+     * @param limit 最多返回多少个批次（按时间倒序）
+     * @return {@code {batches: [...], ungrouped: n, deviceTotal: n}}
+     */
+    Map<String, Object> listBatches(int limit);
+
+    /**
      * 批量删除设备（级联清理遥测/日志/指令/影子，3.3 列表增强）
      * @param deviceKeys 待删除设备标识列表
      * @return 实际删除数量

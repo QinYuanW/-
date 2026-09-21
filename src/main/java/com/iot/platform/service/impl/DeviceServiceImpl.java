@@ -39,6 +39,8 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -158,6 +160,65 @@ public class DeviceServiceImpl implements DeviceService {
         // 记操作日志，让"谁在什么时候改的名"可追溯（详情页「操作日志」tab 会显示）
         insertLog(device.getId(), 3, "重命名：" + (before == null ? "(空)" : before) + " → " + next);
         return true;
+    }
+
+    /**
+     * 批量注册生成的 device_key 形状：{@code <前缀>_<yyyyMMddHHmmss>_<序号>}。
+     * 前端 DeviceRegister 的表单就是按这个拼的（见 genDeviceKey）。
+     */
+    private static final Pattern BATCH_KEY = Pattern.compile("^(.+)_(\\d{14})_(\\d+)$");
+
+    @Override
+    public Map<String, Object> listBatches(int limit) {
+        // 只取三列 —— 1016 台也只是个小结果集，分组在内存里做，避免在 SQL 里玩
+        // SUBSTRING_INDEX 解析命名规律（那种 SQL 既难读又难改）
+        List<Device> all = deviceMapper.selectList(new LambdaQueryWrapper<Device>()
+                .select(Device::getDeviceKey, Device::getProductKey, Device::getCreatedAt)
+                .orderByDesc(Device::getCreatedAt));
+
+        // LinkedHashMap + 倒序遍历 = 新批次在前
+        Map<String, List<Device>> groups = new LinkedHashMap<>();
+        Map<String, String[]> meta = new HashMap<>();
+        int ungrouped = 0;
+        for (Device d : all) {
+            Matcher m = BATCH_KEY.matcher(d.getDeviceKey() == null ? "" : d.getDeviceKey());
+            if (!m.matches()) {
+                ungrouped++;
+                continue;
+            }
+            String productKey = d.getProductKey() == null ? "" : d.getProductKey();
+            String groupKey = productKey + "|" + m.group(1) + "|" + m.group(2);
+            groups.computeIfAbsent(groupKey, k -> new ArrayList<>()).add(d);
+            meta.putIfAbsent(groupKey, new String[]{m.group(1), m.group(2)});
+        }
+
+        List<Map<String, Object>> batches = new ArrayList<>();
+        for (Map.Entry<String, List<Device>> e : groups.entrySet()) {
+            if (batches.size() >= limit) {
+                break;
+            }
+            List<Device> list = e.getValue();
+            String[] mm = meta.get(e.getKey());
+            String productKey = e.getKey().substring(0, e.getKey().indexOf('|'));
+            // created_at 降序排过，所以第一条就是该批最晚注册的那台；取最后一台作为批次时间更稳
+            LocalDateTime stamp = list.get(list.size() - 1).getCreatedAt();
+
+            Map<String, Object> b = new LinkedHashMap<>();
+            b.put("batch_id", e.getKey());
+            b.put("product_key", productKey);
+            b.put("name_prefix", mm[0]);
+            b.put("stamp", mm[1]);
+            b.put("created_at", stamp == null ? null : stamp.toString());
+            b.put("count", list.size());
+            b.put("device_keys", list.stream().map(Device::getDeviceKey).collect(Collectors.toList()));
+            batches.add(b);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("batches", batches);
+        result.put("ungrouped", ungrouped);
+        result.put("deviceTotal", all.size());
+        return result;
     }
 
     /**
