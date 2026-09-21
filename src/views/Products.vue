@@ -72,6 +72,8 @@
             </button>
             <!-- 6.1：改名原先没有入口（名字写错只能改库）；删除原先也没有 -->
             <i class="divider"></i>
+            <button class="action" @click.stop="openCopy(p)">复制</button>
+            <i class="divider"></i>
             <button class="action" @click.stop="openRename(p)">重命名</button>
             <i class="divider"></i>
             <button class="action danger" @click.stop="askDelete(p)">删除</button>
@@ -96,6 +98,29 @@
         <el-button type="primary" :loading="creating" @click="doCreate">创建</el-button>
       </template>
     </el-dialog>
+    <!-- 7.5：复制产品（连物模型一起带走，用于"再开一个同型号产品"这种复用场景） -->
+    <el-dialog v-model="copyVisible" title="复制产品" width="460px">
+      <div class="rename-tip">
+        会连**物模型一起复制**（属性 / 事件 / 服务），但**不复制设备** ——
+        新产品的设备要从零注册或另行迁移。
+      </div>
+      <el-form label-width="96px">
+        <el-form-item label="源产品">
+          <el-input :model-value="`${copyForm.source_name}（${copyForm.source_key}）`" disabled />
+        </el-form-item>
+        <el-form-item label="新产品名称" required>
+          <el-input v-model="copyForm.name" placeholder="如：CO2 传感器（一楼）" maxlength="64" />
+        </el-form-item>
+        <el-form-item label="product_key">
+          <el-input v-model="copyForm.product_key" placeholder="留空自动生成 p_xxxxxxxx" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="copyVisible = false">取消</el-button>
+        <el-button type="primary" :loading="copying" @click="doCopy">创建</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 6.1：重命名产品 -->
     <el-dialog v-model="renameVisible" title="重命名产品" width="440px">
       <div class="rename-tip">
@@ -225,6 +250,46 @@ async function toggleStatus(p) {
 }
 
 // ===== 6.1 重命名 / 删除 =====
+
+// ===== 7.5 复制产品 =====
+// 物模型复用（"再开一个同型号产品"）很常见，原先只能新建一个空产品再手敲一遍 TSL。
+// 后端 `POST /products` 本来就接受 tsl 字段，所以这里是纯前端补齐入口，不用改后端。
+const copyVisible = ref(false)
+const copying = ref(false)
+const copyForm = reactive({ source_key: '', source_name: '', name: '', product_key: '', tsl: null })
+
+function openCopy(p) {
+  copyForm.source_key = p.product_key
+  copyForm.source_name = p.name || p.product_key
+  copyForm.name = `${p.name || p.product_key} 副本`
+  copyForm.product_key = ''
+  // 存下源物模型（列表接口已经返回解析后的 tsl 对象）
+  copyForm.tsl = p.tsl || { properties: [], events: [], services: [] }
+  copyVisible.value = true
+}
+
+async function doCopy() {
+  const name = copyForm.name.trim()
+  if (!name) {
+    ElMessage.warning('请填写新产品名称')
+    return
+  }
+  copying.value = true
+  try {
+    const res = await createProduct({
+      name,
+      product_key: copyForm.product_key.trim() || undefined,
+      tsl: copyForm.tsl
+    })
+    ElMessage.success(`已创建 ${res.data?.product_key || '新产品'}（含物模型，设备需另行注册）`)
+    copyVisible.value = false
+    load()
+  } catch (e) {
+    // 拦截器已提示（如 product_key 重复 / 物模型校验失败）
+  } finally {
+    copying.value = false
+  }
+}
 
 async function openRename(p) {
   renameForm.product_key = p.product_key

@@ -55,6 +55,19 @@ const routes = [
         component: () => import('../views/DeviceDetail.vue'),
         // 同上：设备详情归属「设备」（菜单 index 为 `/`）
         meta: { title: '设备详情', crumb: ['设备管理', '设备详情'], menu: '/' }
+      },
+      {
+        // 1.5：兜底 404。
+        //
+        // 原先没有任何通配路由，访问不存在的地址（如 /foo）会走到 Vue Router 的
+        // "No match found" —— **整页空白，连左侧导航都没有**，用户只能改地址栏才出得去。
+        // （评审报告原先写的是"会落到设备列表"，实测是错的，已更正。）
+        //
+        // 放成 `/` 的子路由而不是独立整页：404 也套在布局壳里，导航还在，用户能直接点走。
+        path: ':pathMatch(.*)*',
+        name: 'not-found',
+        component: () => import('../views/NotFound.vue'),
+        meta: { title: '页面不存在' }
       }
     ]
   }

@@ -33,8 +33,20 @@
       <el-tab-pane label="物模型" name="tsl">
         <div class="panel">
           <div class="tsl-head">
-            <div class="tsl-title">物模型 · {{ product?.name || key }}</div>
+            <div class="tsl-head-left">
+              <div class="tsl-title">物模型 · {{ product?.name || key }}</div>
+              <!-- 7.2：属性/事件/服务三张表原先全挤在一个 tab 里，要翻很久才能到"服务"。
+                   改成子 tab 只渲染当前这一类 —— 段上带计数，避免"被藏起来的东西被忘记"。 -->
+              <el-radio-group v-model="tslSection" size="small" class="sec-switch">
+                <el-radio-button value="properties">属性 {{ properties.length }}</el-radio-button>
+                <el-radio-button value="events">事件 {{ events.length }}</el-radio-button>
+                <el-radio-button value="services">服务 {{ services.length }}</el-radio-button>
+              </el-radio-group>
+            </div>
             <div class="tsl-actions">
+              <!-- 7.4：TSL 导入/导出 —— 把物模型复制到另一个产品原先只能手敲 -->
+              <el-button size="small" :icon="Download" @click="exportTsl">导出</el-button>
+              <el-button size="small" :icon="Upload" @click="openImport">导入</el-button>
               <!-- 7.1：把"有未保存改动"显式说出来，并在保存按钮上给出主次 —— 
                    否则用户看不出当前页面是否已经落库，切走时也不会预期有提醒 -->
               <el-tag v-if="dirty" size="small" type="warning" effect="plain">有未保存的改动</el-tag>
@@ -50,6 +62,7 @@
             </div>
           </div>
 
+          <div v-show="tslSection === 'properties'">
           <h4 class="sec-title">属性 properties</h4>
           <el-table :data="properties" size="small">
             <el-table-column label="key" min-width="120">
@@ -110,6 +123,8 @@
           </el-table>
           <el-button size="small" class="add-btn" @click="addProperty">+ 加一个属性</el-button>
 
+          </div>
+          <div v-show="tslSection === 'events'">
           <h4 class="sec-title">事件 events</h4>
           <el-table :data="events" size="small">
             <el-table-column label="key" min-width="150">
@@ -136,6 +151,8 @@
           </el-table>
           <el-button size="small" class="add-btn" @click="addEvent">+ 加一个事件</el-button>
 
+          </div>
+          <div v-show="tslSection === 'services'">
           <h4 class="sec-title">服务 services</h4>
           <el-table :data="services" size="small">
             <el-table-column label="key" min-width="150">
@@ -165,6 +182,7 @@
             <template #empty><el-empty description="暂无服务" :image-size="50" /></template>
           </el-table>
           <el-button size="small" class="add-btn" @click="addService">+ 加一个服务</el-button>
+          </div>
 
           <p class="hint">
             保存时校验：key 全局唯一且仅字母/数字/下划线；属性 type 仅 int/float/bool/string/enum（enum 必须配置枚举项 elements）、access 仅 readonly/readwrite。
@@ -290,6 +308,27 @@
         <el-button @click="elementsVisible = false">取消</el-button>
         <el-button type="primary" @click="confirmElements">确定</el-button>
       </template>
+      </el-dialog>
+
+    <!-- 7.4：导入物模型（粘贴 JSON 或选文件） -->
+    <el-dialog v-model="importVisible" title="导入物模型" width="600px">
+      <div class="import-hint">
+        粘贴物模型 JSON，或选择一个 .json 文件。导入会**整体替换**编辑区里的
+        属性 / 事件 / 服务（还没落库，点「保存物模型」才生效，关掉页面即可放弃）。
+      </div>
+      <el-input
+        v-model="importText"
+        type="textarea"
+        :rows="10"
+        placeholder='{"properties":[{"key":"temperature","name":"温度","type":"float","unit":"℃"}],"events":[],"services":[]}'
+      />
+      <div class="import-file">
+        <input ref="fileRef" type="file" accept=".json,application/json" @change="onPickFile" />
+      </div>
+      <template #footer>
+        <el-button @click="importVisible = false">取消</el-button>
+        <el-button type="primary" @click="doImport">导入</el-button>
+      </template>
     </el-dialog>
   </div>
 </template>
@@ -298,7 +337,7 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Back } from '@element-plus/icons-vue'
+import { Back, Download, Upload } from '@element-plus/icons-vue'
 import { listProducts, getProductTsl, updateProductTsl, listDevices } from '../api'
 import { formatTime } from '../utils/export'
 
@@ -324,6 +363,104 @@ watch(
 const properties = ref([])
 const events = ref([])
 const services = ref([])
+
+/**
+ * 7.2：物模型内的分段（属性 / 事件 / 服务）。
+ *
+ * <p>用 `v-show` 而不是 `v-if`：三张表都留在 DOM 里，切换不重建表格、
+ * 也不影响任何按 DOM 计算的逻辑（保存校验读的是 state 不是 DOM）。
+ */
+const tslSection = ref('properties')
+
+// ===== 7.4 TSL 导入 / 导出 =====
+const importVisible = ref(false)
+const importText = ref('')
+const fileRef = ref()
+
+/**
+ * 导出**当前编辑中**的物模型（不是库里那一版）—— 用户点导出通常就是想把这版拿走。
+ * 未保存的改动也会一起带走，这样"改完导出、去另一个产品导入"的流程才成立。
+ */
+function exportTsl() {
+  const { tsl: t } = buildTsl()
+  const blob = new Blob([JSON.stringify(t, null, 2)], { type: 'application/json' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `${key.value}-tsl.json`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(a.href)
+}
+
+function openImport() {
+  importText.value = ''
+  importVisible.value = true
+}
+
+function onPickFile(e) {
+  const f = e.target.files && e.target.files[0]
+  if (!f) return
+  const reader = new FileReader()
+  reader.onload = () => { importText.value = String(reader.result || '') }
+  reader.readAsText(f, 'utf-8')
+  // 清空 input：同一个文件再选一次也要能触发 change
+  e.target.value = ''
+}
+
+/**
+ * 导入：整体替换编辑区的三类定义。
+ *
+ * <p>字段映射与 {@link loadTsl} 保持一致 —— 两边形状不同的话，
+ * 导入后会被 7.1 的脏检查判成"有未保存改动"（其实用户什么都没改），
+ * 于是一切换 tab 就弹提醒，很烦。
+ */
+function doImport() {
+  let parsed
+  try {
+    parsed = JSON.parse(importText.value)
+  } catch (err) {
+    ElMessage.error('JSON 解析失败：' + (err && err.message ? err.message : '格式不正确'))
+    return
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    ElMessage.error('导入内容必须是一个 JSON 对象')
+    return
+  }
+  if (!Array.isArray(parsed.properties) && !Array.isArray(parsed.events) && !Array.isArray(parsed.services)) {
+    ElMessage.error('JSON 里至少要有一个 properties / events / services 数组')
+    return
+  }
+  properties.value = (parsed.properties || []).map((p) => ({
+    key: p.key || '',
+    name: p.name || '',
+    type: p.type || 'float',
+    unit: p.unit ?? '',
+    access: p.access || 'readonly',
+    min: p.min ?? '',
+    max: p.max ?? '',
+    step: p.step ?? '',
+    elements: (p.elements || []).map((e) => ({ value: e.value ?? '', key: e.key ?? '' }))
+  }))
+  events.value = (parsed.events || []).map((e) => ({
+    key: e.key || '',
+    name: e.name || '',
+    type: e.type || 'info'
+  }))
+  services.value = (parsed.services || []).map((s) => ({
+    key: s.key || '',
+    name: s.name || '',
+    callType: s.callType || 'async',
+    inputData: (s.inputData || []).map((p) => ({ ...p })),
+    outputData: (s.outputData || []).map((p) => ({ ...p }))
+  }))
+  importVisible.value = false
+  // 跳到有内容的那一段，让用户立刻看到导入结果（否则"导入了什么也没发生"）
+  tslSection.value = properties.value.length
+    ? 'properties'
+    : (events.value.length ? 'events' : 'services')
+  ElMessage.success('已导入到编辑区，点「保存物模型」才会落库')
+}
 const tsl = computed(() => ({
   properties: properties.value,
   events: events.value,
@@ -716,6 +853,32 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+/* 7.2：标题 + 分段器放左边，操作按钮放右边 */
+.tsl-head-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.sec-switch :deep(.el-radio-button__inner) {
+  padding: 5px 12px;
+}
+
+/* 7.4：导入弹窗 */
+.import-hint {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.7;
+  margin-bottom: 10px;
+}
+
+.import-file {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #6b7280;
 }
 
 .tsl-title {
