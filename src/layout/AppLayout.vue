@@ -140,13 +140,23 @@ const compactTitle = computed(() => {
 })
 const username = localStorage.getItem('iot_username') || 'admin'
 
-function handleMenuSelect(index) {
-  if (index === 'grafana') {
-    window.open('http://localhost:3000', '_blank')
-    return
+  /**
+   * Grafana 大盘地址。
+   *
+   * ⚠️ 不能只写 `http://localhost:3000` —— 那样打开的是 Grafana 的 **Home 欢迎页**
+   * （"Welcome to Grafana" + 新手引导卡），用户会以为"监控大盘就长这样"。
+   * 大盘本体在 `/d/<uid>` 上，这里直接指到它。
+   * （后端 uid 定义见 monitoring/grafana/dashboards/iot-platform-main.json）
+   */
+  const GRAFANA_DASHBOARD_URL = 'http://localhost:3000/d/iot-platform-main'
+
+  function handleMenuSelect(index) {
+    if (index === 'grafana') {
+      window.open(GRAFANA_DASHBOARD_URL, '_blank')
+      return
+    }
+    router.push(index)
   }
-  router.push(index)
-}
 
 async function handleLogout() {
   await ElMessageBox.confirm('确定退出登录吗？', '提示', { type: 'warning' })
