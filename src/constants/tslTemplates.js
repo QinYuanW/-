@@ -148,6 +148,41 @@ export const TSL_TEMPLATES = [
 /** 按 id 取模板 */
 export const findTemplate = (id) => TSL_TEMPLATES.find((t) => t.id === id) || null
 
+/**
+ * 把后端的自定义模板（TslTemplateVO）转成与内置模板**同构**的形状，
+ * 这样模板列表 / 套用对话框 / 套用逻辑都不必区分来源。
+ *
+ * @returns {{ id, name, category, description, tsl, builtin, source, rawId }}
+ *   - `id` 用 `custom_<rawId>` 前缀，避免与内置模板 id 撞车（列表里要当 key 用）
+ *   - `rawId` 保留后端主键，编辑/删除时要用
+ */
+export function toUnifiedCustom(vo) {
+  return {
+    id: `custom_${vo.id}`,
+    rawId: vo.id,
+    name: vo.name,
+    category: vo.category || '我的模板',
+    description: vo.description || '（无说明）',
+    tsl: vo.tsl && typeof vo.tsl === 'object' ? vo.tsl : { properties: [], events: [], services: [] },
+    builtin: false,
+    source: 'custom'
+  }
+}
+
+/** 内置模板的统一形状（补上 source / builtin，便于与自定义的一起渲染） */
+export const UNIFIED_BUILTIN = TSL_TEMPLATES.map((t) => ({ ...t, builtin: true, source: 'builtin' }))
+
+/**
+ * 合并展示列表：**内置在前、自定义在后**。
+ *
+ * 顺序是有意的 —— 内置是"随版本走的范文"，位置稳定、用户下次还能在同一位找到；
+ * 自定义是自己新建的，放后面不打断既有肌肉记忆。
+ */
+export function allTemplates(customList = []) {
+  return [...UNIFIED_BUILTIN, ...customList.map(toUnifiedCustom)]
+}
+
+
 /** 模板规模摘要，如「4 属性 · 1 事件 · 1 服务」 */
 export function templateSummary(tpl) {
   const t = tpl?.tsl || {}

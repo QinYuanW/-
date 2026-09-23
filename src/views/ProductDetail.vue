@@ -50,6 +50,8 @@
               <!-- 7.4：TSL 导入/导出 —— 把物模型复制到另一个产品原先只能手敲 -->
               <el-button size="small" :icon="Download" @click="exportTsl">导出</el-button>
               <el-button size="small" :icon="Upload" @click="openImport">导入</el-button>
+              <!-- 存为模板：改完产品顺手存下来复用（模板入库，换机器也在） -->
+              <el-button size="small" :icon="CollectionTag" @click="saveAsTemplate">存为模板</el-button>
               <!-- 7.1：把"有未保存改动"显式说出来，并在保存按钮上给出主次 —— 
                    否则用户看不出当前页面是否已经落库，切走时也不会预期有提醒 -->
               <el-tag v-if="dirty" size="small" type="warning" effect="plain">有未保存的改动</el-tag>
@@ -342,8 +344,8 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Back, Download, Upload, MagicStick } from '@element-plus/icons-vue'
-import { listProducts, getProductTsl, updateProductTsl, listDevices } from '../api'
+import { Back, Download, Upload, MagicStick, CollectionTag } from '@element-plus/icons-vue'
+import { listProducts, getProductTsl, updateProductTsl, listDevices, createTslTemplate } from '../api'
 import { formatTime } from '../utils/export'
 import { mergeTsl } from '../constants/tslTemplates'
 import TslTemplateDialog from '../components/TslTemplateDialog.vue'
@@ -378,6 +380,55 @@ const services = ref([])
  * 也不影响任何按 DOM 计算的逻辑（保存校验读的是 state 不是 DOM）。
  */
 const tslSection = ref('properties')
+
+// ===== 存为模板（用户自定义通用物模型）=====
+
+/**
+ * 把**当前编辑区**的物模型存成可复用模板。
+ *
+ * 为什么用编辑区而不是库里已保存的那份：用户此刻看到的就是他想要的样子 ——
+ * 若改用库里的版本，会出现"我明明改好了，存下来的却是旧的"这种最伤信任的错。
+ * 走 buildTsl() 复用同一套校验，避免"存了份存不进产品的模板"。
+ */
+async function saveAsTemplate() {
+  const { errors, tsl: t } = buildTsl()
+  if (errors.length) {
+    ElMessage.error(errors[0])
+    return
+  }
+  const total = (t.properties?.length || 0) + (t.events?.length || 0) + (t.services?.length || 0)
+  if (!total) {
+    ElMessage.warning('当前物模型是空的，先加点属性再存吧')
+    return
+  }
+  let name = ''
+  try {
+    const r = await ElMessageBox.prompt(
+      '把当前编辑区的物模型存成可复用模板（存库，换机器也在）。之后可在侧栏「物模型」里套用到别的产品。',
+      '存为模板',
+      {
+        confirmButtonText: '保存',
+        cancelButtonText: '取消',
+        inputValue: `${key.value} 的物模型`,
+        inputPlaceholder: '模板名称',
+        inputValidator: (v) => (v && v.trim() ? true : '模板名称不能为空')
+      }
+    )
+    name = String(r.value || '').trim()
+  } catch (e) {
+    return // 用户取消
+  }
+  try {
+    await createTslTemplate({
+      name,
+      description: `从产品 ${key.value} 存下的物模型`,
+      tsl: t
+    })
+    ElMessage.success(`已存为模板「${name}」，可在侧栏「物模型」里找到`)
+  } catch (e) {
+    // 拦截器已提示
+  }
+}
 
 // ===== 通用物模型模板 =====
 const tplRef = ref()

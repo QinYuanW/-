@@ -234,6 +234,28 @@ export const getProductTsl = (productKey) =>
 export const updateProductTsl = (productKey, tsl) =>
   http.put(`/products/${productKey}/tsl`, tsl)
 
+/* ===== 通用物模型模板（用户自定义）=====
+ * 内置模板在 `constants/tslTemplates.js` 里（随代码走），不走接口；
+ * 这里只管**用户自己存下来的**模板。前端把两者合并展示。
+ */
+
+export const listTslTemplates = (params = {}) =>
+  http.get('/tsl-templates', { params })
+
+export const getTslTemplate = (id) =>
+  http.get(`/tsl-templates/${id}`)
+
+/** body: { name, category?, description?, tsl } */
+export const createTslTemplate = (payload) =>
+  http.post('/tsl-templates', payload)
+
+/** tsl 可缺省：只改名/分类/说明 */
+export const updateTslTemplate = (id, payload) =>
+  http.put(`/tsl-templates/${id}`, payload)
+
+export const deleteTslTemplate = (id) =>
+  http.delete(`/tsl-templates/${id}`)
+
 // ===== E1 设备影子 =====
 
 export const getShadow = (deviceKey) =>

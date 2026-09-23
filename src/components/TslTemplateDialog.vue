@@ -3,13 +3,16 @@
     <div class="tpl-body">
       <div class="tpl-list">
         <div
-          v-for="t in TSL_TEMPLATES"
+          v-for="t in list"
           :key="t.id"
           class="tpl-item"
           :class="{ active: t.id === selectedId }"
           @click="selectedId = t.id"
         >
-          <div class="tpl-name">{{ t.name }}</div>
+          <div class="tpl-name">
+            {{ t.name }}
+            <span v-if="t.source === 'custom'" class="badge">自定义</span>
+          </div>
           <div class="tpl-meta">{{ t.category }} · {{ templateSummary(t) }}</div>
         </div>
       </div>
@@ -91,26 +94,33 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { TSL_TEMPLATES, templateSummary, cloneTsl } from '../constants/tslTemplates'
+import { templateSummary, cloneTsl, allTemplates } from '../constants/tslTemplates'
 
 const props = defineProps({
   /** 传入产品列表 → 变成「直接套用到某产品」模式；不传则只把 tsl 交给父组件填编辑区 */
-  products: { type: Array, default: () => [] }
+  products: { type: Array, default: () => [] },
+  /** 用户自定义模板（后端 TslTemplateVO 数组）。内置模板组件内部自带。 */
+  customTemplates: { type: Array, default: () => [] }
 })
 const emit = defineEmits(['apply'])
 
 const visible = ref(false)
-const selectedId = ref(TSL_TEMPLATES[0].id)
+
+/** 内置在前、自定义在后，统一形状（见 constants/tslTemplates.js 的说明） */
+const list = computed(() => allTemplates(props.customTemplates))
+const selectedId = ref('')
 const mode = ref('replace')
 const productKey = ref('')
 
-const selected = computed(() => TSL_TEMPLATES.find((t) => t.id === selectedId.value) || TSL_TEMPLATES[0])
+const selected = computed(() => list.value.find((t) => t.id === selectedId.value) || list.value[0])
 const eventLabel = (t) => ({ info: '信息', alert: '告警', fault: '故障' }[t] || t)
 
-/** @param templateId 可选：从模板卡片进来时预选该模板 */
+/** @param templateId 可选：从模板卡片进来时预选该模板（内置 id 或 custom_<id> 都认） */
 function open(templateId) {
-  if (templateId && TSL_TEMPLATES.some((t) => t.id === templateId)) {
+  if (templateId && list.value.some((t) => t.id === templateId)) {
     selectedId.value = templateId
+  } else if (!list.value.some((t) => t.id === selectedId.value)) {
+    selectedId.value = list.value[0]?.id || ''
   }
   mode.value = 'replace'
   productKey.value = ''
@@ -170,6 +180,18 @@ defineExpose({ open })
   font-size: 13px;
   color: #1f2937;
   font-weight: 500;
+}
+
+/* 自定义模板的标记（内置的不加，避免整列都是标签） */
+.badge {
+  margin-left: 5px;
+  font-size: 10px;
+  font-weight: 400;
+  color: #185fa5;
+  background: #e6f1fb;
+  border-radius: 3px;
+  padding: 1px 4px;
+  vertical-align: 1px;
 }
 
 .tpl-meta {
