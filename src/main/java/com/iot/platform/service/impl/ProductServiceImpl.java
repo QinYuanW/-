@@ -140,75 +140,13 @@ public class ProductServiceImpl implements ProductService {
     }
 
     /** 物模型校验：结构 + key 唯一性 + 类型/读写权限枚举（详见类注释口径） */
+    /**
+     * 物模型校验：规则已抽到 {@link com.iot.platform.util.TslValidator}，
+     * 与「通用物模型模板」共用同一份 —— 否则两处规则会漂移成
+     * "模板存得进、套到产品被拒"这类无从理解的错误。
+     */
     private void validateTsl(Map<String, Object> tsl) {
-        if (tsl == null || tsl.isEmpty()) {
-            throw new BizException(ErrorCode.PARAM_ERROR, "tsl 不能为空");
-        }
-        if (!(tsl.get("properties") instanceof List)) {
-            throw new BizException(ErrorCode.PARAM_ERROR, "tsl.properties 必须是数组（可为空）");
-        }
-        Set<String> seen = new HashSet<>();
-        for (String section : List.of("properties", "services", "events")) {
-            Object raw = tsl.get(section);
-            if (raw == null) {
-                continue; // services/events 可缺省
-            }
-            if (!(raw instanceof List)) {
-                throw new BizException(ErrorCode.PARAM_ERROR, "tsl." + section + " 必须是数组");
-            }
-            int i = 0;
-            for (Object o : (List<?>) raw) {
-                String at = section + "[" + i++ + "]";
-                if (!(o instanceof Map)) {
-                    throw new BizException(ErrorCode.PARAM_ERROR, at + " 必须是对象");
-                }
-                Map<?, ?> item = (Map<?, ?>) o;
-
-                String key = str(item.get("key"));
-                if (key == null || key.isBlank()) {
-                    throw new BizException(ErrorCode.PARAM_ERROR, at + ".key 不能为空");
-                }
-                if (!key.matches("[A-Za-z0-9_]{1,64}")) {
-                    throw new BizException(ErrorCode.PARAM_ERROR,
-                            at + ".key 仅允许字母/数字/下划线（≤64）: " + key);
-                }
-                if (!seen.add(key)) {
-                    throw new BizException(ErrorCode.PARAM_ERROR, at + ".key 重复: " + key);
-                }
-                if (item.get("name") == null || String.valueOf(item.get("name")).isBlank()) {
-                    throw new BizException(ErrorCode.PARAM_ERROR, at + ".name 不能为空");
-                }
-                if ("properties".equals(section)) {
-                    String type = str(item.get("type"));
-                    if (!ALLOWED_TYPES.contains(type)) {
-                        throw new BizException(ErrorCode.PARAM_ERROR,
-                                at + ".type 仅允许 int/float/bool/string/enum，实际: " + type);
-                    }
-                    if ("enum".equals(type)) {
-                        Object elems = item.get("elements");
-                        if (!(elems instanceof List) || ((List<?>) elems).isEmpty()) {
-                            throw new BizException(ErrorCode.PARAM_ERROR,
-                                    at + ".type=enum 时必须配置 elements 枚举项");
-                        }
-                        for (Object e : (List<?>) elems) {
-                            if (!(e instanceof Map) || ((Map<?, ?>) e).get("value") == null
-                                    || str(((Map<?, ?>) e).get("key")).isBlank()) {
-                                throw new BizException(ErrorCode.PARAM_ERROR,
-                                        at + ".elements 每项需含 value 与 key（key 为展示文本）");
-                            }
-                        }
-                    }
-                    String access = str(item.get("access"));
-                    if (access == null) {
-                        access = "readonly";
-                    }
-                    if (!ALLOWED_ACCESS.contains(access)) {
-                        throw new BizException(ErrorCode.PARAM_ERROR,
-                                at + ".access 仅允许 readonly/readwrite，实际: " + access);
-                    }
-                }
-            }
-        }
+        com.iot.platform.util.TslValidator.validate(tsl);
     }
 
     private Map<String, Object> emptyTsl() {
