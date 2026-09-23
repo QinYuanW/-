@@ -11,8 +11,8 @@
 
 USE `iot_platform`;
 
--- 1. 表清单（应 11 张）
-SELECT '=== 1. 表清单（应 11 张）===' AS `step`;
+-- 1. 表清单（应 12 张）
+SELECT '=== 1. 表清单（应 12 张）===' AS `step`;
 SELECT COUNT(*) AS `table_count` FROM information_schema.tables
 WHERE table_schema = 'iot_platform' AND table_type = 'BASE TABLE';
 SHOW TABLES;

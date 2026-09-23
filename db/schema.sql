@@ -1,6 +1,6 @@
 -- ============================================================
 -- 物联网 PaaS 云平台 · 数据库表结构
--- 数据库：iot_platform   版本：v1.3   日期：2026-09-17
+-- 数据库：iot_platform   版本：v1.4   日期：2026-09-23
 -- 引擎：MySQL 5.7.8+（兼容 8.0）   InnoDB   字符集：utf8mb4
 --
 -- 本文件是「设备 → 平台 → 控制台」全链路的数据合同：
@@ -315,6 +315,29 @@ CREATE TABLE IF NOT EXISTS `device_event` (
   KEY `idx_device_ts` (`device_id`, `ts`),
   KEY `idx_device_event_ts` (`device_id`, `event_key`, `ts`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='设备事件表（E3）：事件上报落点，展示名按 TSL 回填';
+
+-- ============================================================
+-- 12. tsl_template：通用物模型模板（用户自定义）
+--     用途：把"温湿度传感器""智能灯"这类常见物模型存成可复用模板，建产品时一键套用。
+--     ⚠️ 内置模板**不入库** —— 它们随代码版本走（控制台前端常量），换库/换环境也一定在；
+--        本表只存**用户自己**创建的模板。两者生命周期不同，故分开存；
+--        前端负责合并展示。builtin 字段为"将来把内置也入库"预留，当前恒 0。
+--     tsl 与 product.tsl **同构**，因此"套用模板"= 一次赋值，"存为模板"= 一次快照，
+--     中间不需要任何格式转换；校验共用 util/TslValidator（与产品物模型同一套规则）。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS `tsl_template` (
+  `id`          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `name`        VARCHAR(64)     NOT NULL                COMMENT '模板名称',
+  `category`    VARCHAR(32)     NULL                    COMMENT '分类（环境监测 / 控制类 / 安防类 …），仅用于分组展示',
+  `description` VARCHAR(255)    NULL                    COMMENT '说明（模板库卡片上展示）',
+  `tsl`         JSON            NOT NULL                COMMENT '物模型定义，与 product.tsl 同构（properties / events / services）',
+  `builtin`     TINYINT(4)      NOT NULL DEFAULT 0      COMMENT '预留：1=内置模板入过库；当前恒 0（内置在控制台前端常量）',
+  `deleted`     TINYINT(4)      NOT NULL DEFAULT 0      COMMENT '软删：0未删 1已删（对齐 MyBatis-Plus @TableLogic）',
+  `created_at`  DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at`  DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_category_deleted` (`category`, `deleted`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='通用物模型模板（用户自定义；内置模板在前端常量）';
 
 -- ============================================================
 -- 设计说明（面试 / 论文可讲点）
