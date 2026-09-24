@@ -91,7 +91,7 @@
     <TslTemplateDialog ref="dlgRef" :products="products" :custom-templates="rawCustom" @apply="onApply" />
 
     <!-- 新建 / 编辑模板 -->
-    <el-dialog v-model="formVisible" :title="form.id ? '编辑模板' : '新建模板'" width="720px" top="6vh">
+      <el-dialog v-model="formVisible" :title="form.id ? '编辑模板' : '新建模板'" width="1040px" top="5vh">
       <el-form label-width="92px">
         <el-form-item label="模板名称" required>
           <el-input v-model="form.name" maxlength="64" placeholder="如：办公室温湿度（带阈值事件）" />
@@ -104,35 +104,35 @@
         <el-form-item label="说明">
           <el-input v-model="form.description" maxlength="255" placeholder="这个模板适合什么设备 / 用在哪" />
         </el-form-item>
-
-        <el-form-item label="物模型">
-          <div class="tsl-source">
-            <div class="src-row">
-              <span class="lbl">从产品复制</span>
-              <el-select v-model="form.fromProduct" placeholder="选产品 → 取其物模型" clearable size="small" style="width: 240px" @change="pullFromProduct">
-                <el-option
-                  v-for="p in products"
-                  :key="p.product_key"
-                  :value="p.product_key"
-                  :label="p.name + '（' + p.product_key + '）'"
-                />
-              </el-select>
-              <span class="hint">选中即把该产品当前物模型填到下面</span>
-            </div>
-            <el-input v-model="form.tslText" type="textarea" :rows="9" spellcheck="false" placeholder="也可以直接粘贴物模型 JSON" />
-            <div class="tsl-preview" :class="{ bad: !!tslError }">
-              <template v-if="tslError">⚠️ {{ tslError }}</template>
-              <template v-else-if="parsedTsl">
-                属性 {{ parsedTsl.properties?.length || 0 }} · 事件 {{ parsedTsl.events?.length || 0 }} · 服务 {{ parsedTsl.services?.length || 0 }}
-              </template>
-              <template v-else>（还没有内容）</template>
-            </div>
-          </div>
-        </el-form-item>
       </el-form>
+
+      <!-- 物模型：与产品详情**同一个编辑器组件**（加/删属性、枚举项、服务参数都能点着改）。
+           原先这里只有一个 JSON 文本框 —— 同一个"物模型"，产品那边能点着改、模板这边要手敲 JSON，
+           用户问出"模板不能自己加属性吗"很正常。 -->
+      <div class="tpl-editor-head">
+        <span class="tpl-editor-title">物模型 · {{ tslSummary(form) }}</span>
+        <div class="tpl-editor-src">
+          <span class="lbl">从产品复制</span>
+          <el-select v-model="form.fromProduct" placeholder="选中即覆盖下面的编辑区" clearable size="small" style="width: 220px" @change="pullFromProduct">
+            <el-option
+              v-for="p in products"
+              :key="p.product_key"
+              :value="p.product_key"
+              :label="p.name + '（' + p.product_key + '）'"
+            />
+          </el-select>
+        </div>
+      </div>
+      <TslEditor
+        v-model:section="form.section"
+        :properties="form.properties"
+        :events="form.events"
+        :services="form.services"
+      />
+
       <template #footer>
         <el-button @click="formVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" :disabled="!!tslError" @click="saveTemplate">保存</el-button>
+        <el-button type="primary" :loading="saving" @click="saveTemplate">保存</el-button>
       </template>
     </el-dialog>
   </div>
@@ -143,6 +143,7 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { UNIFIED_BUILTIN, templateSummary, cloneTsl, mergeTsl, toUnifiedCustom } from '../constants/tslTemplates'
+import { normalizeTsl, buildTsl, tslSummary, emptyTslSections } from '../utils/tslBuild'
 import {
   listProducts,
   getProductTsl,
@@ -153,6 +154,7 @@ import {
   deleteTslTemplate
 } from '../api'
 import TslTemplateDialog from '../components/TslTemplateDialog.vue'
+import TslEditor from '../components/TslEditor.vue'
 
 const CATEGORIES = ['环境监测', '控制类', '安防类', '计量类', '网关/中继']
 
@@ -190,29 +192,11 @@ async function loadTemplates() {
 // ===== 新建 / 编辑 =====
 const formVisible = ref(false)
 const saving = ref(false)
-const form = ref({ id: null, name: '', category: '', description: '', tslText: '', fromProduct: '' })
-
-const parsedTsl = computed(() => {
-  const t = form.value.tslText.trim()
-  if (!t) return null
-  try {
-    return JSON.parse(t)
-  } catch {
-    return null
-  }
-})
-
-/** 只做本地即时反馈；真正的结构校验（key 唯一、type 白名单…）在后端 TslValidator */
-const tslError = computed(() => {
-  const t = form.value.tslText.trim()
-  if (!t) return '物模型不能为空'
-  if (!parsedTsl.value) return 'JSON 解析失败：请检查括号、引号与逗号'
-  if (!Array.isArray(parsedTsl.value.properties)) return 'properties 必须是数组（可为空）'
-  return ''
-})
+/** 物模型三段直接放在 form 里，交给 TslEditor 就地编辑（它是"就地改数组"的约定） */
+const form = ref({ id: null, name: '', category: '', description: '', fromProduct: '', section: 'properties', ...emptyTslSections() })
 
 function openCreate() {
-  form.value = { id: null, name: '', category: '', description: '', tslText: '', fromProduct: '' }
+  form.value = { id: null, name: '', category: '', description: '', fromProduct: '', section: 'properties', ...emptyTslSections() }
   formVisible.value = true
 }
 
@@ -222,18 +206,39 @@ function openEdit(t) {
     name: t.name,
     category: t.category === '我的模板' ? '' : (t.category || ''),
     description: t.description === '（无说明）' ? '' : (t.description || ''),
-    tslText: JSON.stringify(t.tsl, null, 2),
-    fromProduct: ''
+    fromProduct: '',
+    section: 'properties',
+    ...normalizeTsl(t.tsl)
   }
   formVisible.value = true
 }
 
-/** 从产品取当前物模型 —— "改完产品顺手存成模板"是最常见的用法 */
+/**
+ * 从产品取当前物模型 —— "改完产品顺手存成模板"是最常见的用法。
+ * ⚠️ 会**整体覆盖**编辑区，所以编辑已有内容前先确认（不然手改的几行会无声消失）。
+ */
 async function pullFromProduct(productKey) {
   if (!productKey) return
+  const total = form.value.properties.length + form.value.events.length + form.value.services.length
+  if (total > 0) {
+    try {
+      await ElMessageBox.confirm(
+        '会用该产品的物模型**整体替换**当前编辑区的内容（' + tslSummary(form.value) + '）。确定继续？',
+        '确认覆盖编辑区',
+        { type: 'warning', confirmButtonText: '覆盖', cancelButtonText: '取消' }
+      )
+    } catch (e) {
+      form.value.fromProduct = ''
+      return
+    }
+  }
   try {
     const res = await getProductTsl(productKey)
-    form.value.tslText = JSON.stringify(res.data || {}, null, 2)
+    const s = normalizeTsl(res.data)
+    form.value.properties = s.properties
+    form.value.events = s.events
+    form.value.services = s.services
+    form.value.section = s.properties.length ? 'properties' : (s.events.length ? 'events' : 'services')
     if (!form.value.name.trim()) {
       const p = products.value.find((x) => x.product_key === productKey)
       if (p) form.value.name = p.name + '（模板）'
@@ -248,13 +253,27 @@ async function saveTemplate() {
     ElMessage.warning('请填写模板名称')
     return
   }
+  // 与产品保存走**同一个** buildTsl（前端这份负责尽早给提示，后端 TslValidator 最终把关）
+  const { errors, tsl } = buildTsl({
+    properties: form.value.properties,
+    events: form.value.events,
+    services: form.value.services
+  })
+  if (errors.length) {
+    ElMessage.error(errors[0])
+    return
+  }
+  if (!tsl.properties.length && !tsl.events.length && !tsl.services.length) {
+    ElMessage.warning('物模型是空的，至少加一个属性 / 事件 / 服务')
+    return
+  }
   saving.value = true
   try {
     const payload = {
       name: form.value.name.trim(),
       category: form.value.category || null,
       description: form.value.description || null,
-      tsl: parsedTsl.value
+      tsl
     }
     if (form.value.id) {
       await updateTslTemplate(form.value.id, payload)
@@ -551,34 +570,31 @@ onMounted(() => {
   gap: 8px;
 }
 
-.tsl-source {
-  width: 100%;
+/* 编辑器头部：左边规模摘要，右边「从产品复制」的快捷入口 */
+.tpl-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 2px 0 6px;
+  padding-top: 10px;
+  border-top: 1px dashed #eef1f6;
 }
 
-.src-row {
+.tpl-editor-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.tpl-editor-src {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 8px;
 }
 
-.src-row .lbl {
+.tpl-editor-src .lbl {
   font-size: 12px;
   color: #6b7280;
-}
-
-.src-row .hint {
-  font-size: 11px;
-  color: #9ca3af;
-}
-
-.tsl-preview {
-  margin-top: 6px;
-  font-size: 12px;
-  color: #185fa5;
-}
-
-.tsl-preview.bad {
-  color: #a32d2d;
 }
 </style>

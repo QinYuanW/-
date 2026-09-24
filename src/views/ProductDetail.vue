@@ -35,13 +35,6 @@
           <div class="tsl-head">
             <div class="tsl-head-left">
               <div class="tsl-title">物模型 · {{ product?.name || key }}</div>
-              <!-- 7.2：属性/事件/服务三张表原先全挤在一个 tab 里，要翻很久才能到"服务"。
-                   改成子 tab 只渲染当前这一类 —— 段上带计数，避免"被藏起来的东西被忘记"。 -->
-              <el-radio-group v-model="tslSection" size="small" class="sec-switch">
-                <el-radio-button value="properties">属性 {{ properties.length }}</el-radio-button>
-                <el-radio-button value="events">事件 {{ events.length }}</el-radio-button>
-                <el-radio-button value="services">服务 {{ services.length }}</el-radio-button>
-              </el-radio-group>
             </div>
             <div class="tsl-actions">
               <!-- 通用物模型：从内置模板一键生成常见设备的属性/事件/服务，
@@ -67,134 +60,12 @@
             </div>
           </div>
 
-          <div v-show="tslSection === 'properties'">
-          <h4 class="sec-title">属性 properties</h4>
-          <el-table :data="properties" size="small">
-            <el-table-column label="key" min-width="120">
-              <template #default="{ row }"><el-input v-model="row.key" size="small" placeholder="temperature" /></template>
-            </el-table-column>
-            <el-table-column label="名称" min-width="100">
-              <template #default="{ row }"><el-input v-model="row.name" size="small" placeholder="温度" /></template>
-            </el-table-column>
-            <el-table-column label="类型" width="90">
-              <template #default="{ row }">
-                <el-select v-model="row.type" size="small">
-                  <el-option v-for="t in types" :key="t" :value="t" :label="t" />
-                </el-select>
-              </template>
-            </el-table-column>
-            <el-table-column label="单位" width="80">
-              <template #default="{ row }"><el-input v-model="row.unit" size="small" placeholder="℃" /></template>
-            </el-table-column>
-            <el-table-column label="读写" width="120">
-              <template #default="{ row }">
-                <el-select v-model="row.access" size="small">
-                  <el-option value="readonly" label="readonly 只读" />
-                  <el-option value="readwrite" label="readwrite 可写" />
-                </el-select>
-              </template>
-            </el-table-column>
-            <el-table-column label="min" width="80">
-              <template #default="{ row }">
-                <el-input v-model="row.min" size="small" placeholder="0" @input="normalizeNum(row, 'min')" />
-              </template>
-            </el-table-column>
-            <el-table-column label="max" width="80">
-              <template #default="{ row }">
-                <el-input v-model="row.max" size="small" placeholder="100" @input="normalizeNum(row, 'max')" />
-              </template>
-            </el-table-column>
-            <el-table-column label="step" width="70">
-              <template #default="{ row }">
-                <el-input
-                  v-if="row.type === 'int' || row.type === 'float'"
-                  v-model="row.step"
-                  size="small"
-                  placeholder="1"
-                  @input="normalizeNum(row, 'step')"
-                />
-              </template>
-            </el-table-column>
-            <el-table-column label="枚举" width="70">
-              <template #default="{ row }">
-                <el-button v-if="row.type === 'enum'" size="small" text type="primary" @click="openElements(row)">配置</el-button>
-              </template>
-            </el-table-column>
-            <el-table-column label="" width="60">
-              <template #default="{ $index }">
-                <el-button size="small" text type="danger" @click="properties.splice($index, 1)">删除</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-          <el-button size="small" class="add-btn" @click="addProperty">+ 加一个属性</el-button>
-          <!-- 常用属性库：温度/湿度/电压这些属性的定义（单位、类型、量程）在行业里几乎有共识，
-               与其让用户手敲，不如列出来勾选。与「+ 加一个属性」并存：冷门属性和自定义单位仍需手填。 -->
-          <el-button size="small" class="add-btn" :icon="List" @click="propPickerRef?.open()">从常用属性添加</el-button>
-
-          </div>
-          <div v-show="tslSection === 'events'">
-          <h4 class="sec-title">事件 events</h4>
-          <el-table :data="events" size="small">
-            <el-table-column label="key" min-width="150">
-              <template #default="{ row }"><el-input v-model="row.key" size="small" placeholder="high_temp_alarm" /></template>
-            </el-table-column>
-            <el-table-column label="名称" min-width="120">
-              <template #default="{ row }"><el-input v-model="row.name" size="small" placeholder="高温告警" /></template>
-            </el-table-column>
-            <el-table-column label="类型" width="110">
-              <template #default="{ row }">
-                <el-select v-model="row.type" size="small">
-                  <el-option value="info" label="信息" />
-                  <el-option value="alert" label="告警" />
-                  <el-option value="fault" label="故障" />
-                </el-select>
-              </template>
-            </el-table-column>
-            <el-table-column label="" width="60">
-              <template #default="{ $index }">
-                <el-button size="small" text type="danger" @click="events.splice($index, 1)">删除</el-button>
-              </template>
-            </el-table-column>
-            <template #empty><el-empty description="暂无事件" :image-size="50" /></template>
-          </el-table>
-          <el-button size="small" class="add-btn" @click="addEvent">+ 加一个事件</el-button>
-
-          </div>
-          <div v-show="tslSection === 'services'">
-          <h4 class="sec-title">服务 services</h4>
-          <el-table :data="services" size="small">
-            <el-table-column label="key" min-width="150">
-              <template #default="{ row }"><el-input v-model="row.key" size="small" placeholder="reboot" /></template>
-            </el-table-column>
-            <el-table-column label="名称" min-width="120">
-              <template #default="{ row }"><el-input v-model="row.name" size="small" placeholder="重启设备" /></template>
-            </el-table-column>
-            <el-table-column label="调用方式" width="110">
-              <template #default="{ row }">
-                <el-select v-model="row.callType" size="small">
-                  <el-option value="async" label="异步" />
-                  <el-option value="sync" label="同步" />
-                </el-select>
-              </template>
-            </el-table-column>
-            <el-table-column label="参数" width="90">
-              <template #default="{ row }">
-                <el-button size="small" text type="primary" @click="openParams(row)">配置</el-button>
-              </template>
-            </el-table-column>
-            <el-table-column label="" width="60">
-              <template #default="{ $index }">
-                <el-button size="small" text type="danger" @click="services.splice($index, 1)">删除</el-button>
-              </template>
-            </el-table-column>
-            <template #empty><el-empty description="暂无服务" :image-size="50" /></template>
-          </el-table>
-          <el-button size="small" class="add-btn" @click="addService">+ 加一个服务</el-button>
-          </div>
-
-          <p class="hint">
-            保存时校验：key 全局唯一且仅字母/数字/下划线；属性 type 仅 int/float/bool/string/enum（enum 必须配置枚举项 elements）、access 仅 readonly/readwrite。
-          </p>
+          <TslEditor
+            v-model:section="tslSection"
+            :properties="properties"
+            :events="events"
+            :services="services"
+          />
         </div>
       </el-tab-pane>
 
@@ -238,86 +109,6 @@
       </el-tab-pane>
     </el-tabs>
 
-    <!-- 服务参数配置 -->
-    <el-dialog v-model="paramsVisible" :title="`服务参数 · ${paramsService?.name || ''}`" width="640px">
-      <div class="params-block">
-        <p class="params-label">输入参数 inputData</p>
-        <el-table :data="paramsInput" size="small">
-          <el-table-column label="key" min-width="120">
-            <template #default="{ row }"><el-input v-model="row.key" size="small" /></template>
-          </el-table-column>
-          <el-table-column label="名称" min-width="110">
-            <template #default="{ row }"><el-input v-model="row.name" size="small" /></template>
-          </el-table-column>
-          <el-table-column label="类型" width="100">
-            <template #default="{ row }">
-              <el-select v-model="row.type" size="small">
-                <el-option v-for="t in types" :key="t" :value="t" :label="t" />
-              </el-select>
-            </template>
-          </el-table-column>
-          <el-table-column label="" width="60">
-            <template #default="{ $index }">
-              <el-button size="small" text type="danger" @click="paramsInput.splice($index, 1)">删除</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-        <el-button size="small" @click="paramsInput.push({ key: '', name: '', type: 'string' })">+ 参数</el-button>
-      </div>
-      <div class="params-block">
-        <p class="params-label">输出参数 outputData</p>
-        <el-table :data="paramsOutput" size="small">
-          <el-table-column label="key" min-width="120">
-            <template #default="{ row }"><el-input v-model="row.key" size="small" /></template>
-          </el-table-column>
-          <el-table-column label="名称" min-width="110">
-            <template #default="{ row }"><el-input v-model="row.name" size="small" /></template>
-          </el-table-column>
-          <el-table-column label="类型" width="100">
-            <template #default="{ row }">
-              <el-select v-model="row.type" size="small">
-                <el-option v-for="t in types" :key="t" :value="t" :label="t" />
-              </el-select>
-            </template>
-          </el-table-column>
-          <el-table-column label="" width="60">
-            <template #default="{ $index }">
-              <el-button size="small" text type="danger" @click="paramsOutput.splice($index, 1)">删除</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-        <el-button size="small" @click="paramsOutput.push({ key: '', name: '', type: 'string' })">+ 参数</el-button>
-      </div>
-      <template #footer>
-        <el-button @click="paramsVisible = false">取消</el-button>
-        <el-button type="primary" @click="confirmParams">确定</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 枚举项配置 -->
-    <el-dialog v-model="elementsVisible" :title="`枚举项 · ${elementsProp?.name || ''}`" width="480px">
-      <p class="params-label">枚举项 elements（value 为上报/下发值，key 为展示文本）</p>
-      <el-table :data="elementsList" size="small">
-        <el-table-column label="value" width="140">
-          <template #default="{ row }"><el-input v-model="row.value" size="small" placeholder="1" /></template>
-        </el-table-column>
-        <el-table-column label="key（展示文本）" min-width="140">
-          <template #default="{ row }"><el-input v-model="row.key" size="small" placeholder="开启" /></template>
-        </el-table-column>
-        <el-table-column label="" width="60">
-          <template #default="{ $index }">
-            <el-button size="small" text type="danger" @click="elementsList.splice($index, 1)">删除</el-button>
-          </template>
-        </el-table-column>
-        <template #empty><el-empty description="暂无枚举项" :image-size="50" /></template>
-      </el-table>
-      <el-button size="small" class="add-btn" @click="elementsList.push({ value: '', key: '' })">+ 枚举项</el-button>
-      <template #footer>
-        <el-button @click="elementsVisible = false">取消</el-button>
-        <el-button type="primary" @click="confirmElements">确定</el-button>
-      </template>
-      </el-dialog>
-
     <!-- 7.4：导入物模型（粘贴 JSON 或选文件） -->
     <el-dialog v-model="importVisible" title="导入物模型" width="600px">
       <div class="import-hint">
@@ -340,8 +131,6 @@
     </el-dialog>
     <!-- 通用物模型模板选择（只把结果交给编辑区，不直接落库） -->
     <TslTemplateDialog ref="tplRef" @apply="onTemplateApply" />
-    <!-- 常用属性库（多选后追加到属性表，同样只改编辑区，点保存才落库） -->
-    <CommonPropertyDialog ref="propPickerRef" :existing-keys="existingPropKeys" @confirm="onAddCommonProperties" />
   </div>
 </template>
 
@@ -349,17 +138,16 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Back, Download, Upload, MagicStick, CollectionTag, List } from '@element-plus/icons-vue'
+import { Back, Download, Upload, MagicStick, CollectionTag } from '@element-plus/icons-vue'
 import { listProducts, getProductTsl, updateProductTsl, listDevices, createTslTemplate } from '../api'
 import { formatTime } from '../utils/export'
 import { mergeTsl } from '../constants/tslTemplates'
 import TslTemplateDialog from '../components/TslTemplateDialog.vue'
-import CommonPropertyDialog from '../components/CommonPropertyDialog.vue'
+import TslEditor from '../components/TslEditor.vue'
+import { normalizeTsl, buildTsl } from '../utils/tslBuild'
 
 const route = useRoute()
 const key = computed(() => route.params.key)
-
-const types = ['int', 'float', 'bool', 'string', 'enum']
 
 const product = ref(null)
 const loading = ref(false)
@@ -394,10 +182,10 @@ const tslSection = ref('properties')
  *
  * 为什么用编辑区而不是库里已保存的那份：用户此刻看到的就是他想要的样子 ——
  * 若改用库里的版本，会出现"我明明改好了，存下来的却是旧的"这种最伤信任的错。
- * 走 buildTsl() 复用同一套校验，避免"存了份存不进产品的模板"。
+ * 走 buildTsl({ properties: properties.value, events: events.value, services: services.value }) 复用同一套校验，避免"存了份存不进产品的模板"。
  */
 async function saveAsTemplate() {
-  const { errors, tsl: t } = buildTsl()
+  const { errors, tsl: t } = buildTsl({ properties: properties.value, events: events.value, services: services.value })
   if (errors.length) {
     ElMessage.error(errors[0])
     return
@@ -434,26 +222,6 @@ async function saveAsTemplate() {
   } catch (e) {
     // 拦截器已提示
   }
-}
-
-// ===== 常用属性库（往现有物模型上补单个属性）=====
-const propPickerRef = ref()
-
-/**
- * 当前编辑区已有的属性 key。
- *
- * 传给弹窗用于**禁用已存在的项** —— 后端校验里 key 是「三段之间全局唯一」，
- * 若放任重复添加，用户会一路填到点保存时才被拦下，那时已白填一堆。
- */
-const existingPropKeys = computed(() =>
-  properties.value.map((p) => String(p.key || '').trim()).filter(Boolean)
-)
-
-function onAddCommonProperties(rows) {
-  if (!rows.length) return
-  properties.value = [...properties.value, ...rows]
-  tslSection.value = 'properties'
-  ElMessage.success(`已添加 ${rows.length} 个常用属性，点「保存物模型」才会落库`)
 }
 
 // ===== 通用物模型模板 =====
@@ -495,7 +263,7 @@ const fileRef = ref()
  * 未保存的改动也会一起带走，这样"改完导出、去另一个产品导入"的流程才成立。
  */
 function exportTsl() {
-  const { tsl: t } = buildTsl()
+  const { tsl: t } = buildTsl({ properties: properties.value, events: events.value, services: services.value })
   const blob = new Blob([JSON.stringify(t, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -641,16 +409,9 @@ const devicesPage = ref(1)
 const devicesPageSize = 10
 
 // 服务参数弹窗
-const paramsVisible = ref(false)
-const paramsService = ref(null)
-const paramsInput = ref([])
-const paramsOutput = ref([])
 const paramsSnapshot = ref(null)
 
 // 枚举项弹窗
-const elementsVisible = ref(false)
-const elementsProp = ref(null)
-const elementsList = ref([])
 
 const nodeTypeText = computed(() => {
   const m = { 1: '直连设备', 2: '网关设备', 3: '子设备' }
@@ -675,29 +436,10 @@ async function loadTsl(productKey) {
   try {
     const res = await getProductTsl(productKey)
     const t = res.data || {}
-    properties.value = (t.properties || []).map((p) => ({
-      key: p.key || '',
-      name: p.name || '',
-      type: p.type || 'float',
-      unit: p.unit ?? '',
-      access: p.access || 'readonly',
-      min: p.min ?? '',
-      max: p.max ?? '',
-      step: p.step ?? '',
-      elements: (p.elements || []).map((e) => ({ value: e.value ?? '', key: e.key ?? '' }))
-    }))
-    events.value = (t.events || []).map((e) => ({
-      key: e.key || '',
-      name: e.name || '',
-      type: e.type || 'info'
-    }))
-    services.value = (t.services || []).map((s) => ({
-      key: s.key || '',
-      name: s.name || '',
-      callType: s.callType || 'async',
-      inputData: (s.inputData || []).map((p) => ({ ...p })),
-      outputData: (s.outputData || []).map((p) => ({ ...p }))
-    }))
+    const sections = normalizeTsl(t)
+    properties.value = sections.properties
+    events.value = sections.events
+    services.value = sections.services
   } catch (e) {
     properties.value = []
     events.value = []
@@ -709,136 +451,9 @@ async function loadTsl(productKey) {
   }
 }
 
-function normalizeNum(row, field) {
-  const v = row[field]
-  if (v === '' || v == null) return
-  const n = Number(v)
-  if (Number.isNaN(n)) row[field] = ''
-  else row[field] = n
-}
-
-function addProperty() {
-  properties.value.push({ key: '', name: '', type: 'float', unit: '', access: 'readonly', min: '', max: '', step: '', elements: [] })
-}
-
-function addEvent() {
-  events.value.push({ key: '', name: '', type: 'info' })
-}
-
-function addService() {
-  services.value.push({ key: '', name: '', callType: 'async', inputData: [], outputData: [] })
-}
-
-function openParams(row) {
-  paramsService.value = row
-  paramsInput.value = row.inputData.map((p) => ({ ...p }))
-  paramsOutput.value = row.outputData.map((p) => ({ ...p }))
-  paramsSnapshot.value = row
-  paramsVisible.value = true
-}
-
-function confirmParams() {
-  paramsService.value.inputData = paramsInput.value
-    .filter((p) => String(p.key || '').trim())
-    .map((p) => ({ ...p }))
-  paramsService.value.outputData = paramsOutput.value
-    .filter((p) => String(p.key || '').trim())
-    .map((p) => ({ ...p }))
-  paramsVisible.value = false
-}
-
-function openElements(row) {
-  elementsProp.value = row
-  elementsList.value = (row.elements || []).map((e) => ({ value: e.value ?? '', key: e.key ?? '' }))
-  elementsVisible.value = true
-}
-
-function confirmElements() {
-  elementsProp.value.elements = elementsList.value
-    .filter((e) => e.value !== '' && e.value != null && String(e.key || '').trim())
-    .map((e) => {
-      const v = String(e.value).trim()
-      return { value: /^-?\d+(\.\d+)?$/.test(v) ? Number(v) : v, key: String(e.key).trim() }
-    })
-  elementsVisible.value = false
-}
-
-function buildTsl() {
-  const sections = { properties: properties.value, events: events.value, services: services.value }
-  const seen = new Set()
-  const errors = []
-
-  for (const [section, list] of Object.entries(sections)) {
-    list.forEach((item, i) => {
-      const at = `${section}[${i}]`
-      const k = String(item.key || '').trim()
-      if (!k) return errors.push(`${at}.key 不能为空`)
-      if (!/^[A-Za-z0-9_]{1,64}$/.test(k)) {
-        errors.push(`${at}.key 仅允许字母/数字/下划线（≤64）: ${k}`)
-      }
-      if (seen.has(k)) errors.push(`${at}.key 重复: ${k}`)
-      seen.add(k)
-      if (!String(item.name || '').trim()) errors.push(`${at}.name 不能为空`)
-      if (section === 'properties') {
-        if (!types.includes(item.type)) errors.push(`${at}.type 仅允许 int/float/bool/string/enum`)
-        if (!['readonly', 'readwrite'].includes(item.access)) errors.push(`${at}.access 仅允许 readonly/readwrite`)
-        if (item.type === 'enum') {
-          const elems = Array.isArray(item.elements) ? item.elements : []
-          if (!elems.length) errors.push(`${at}.type=enum 时必须配置 elements 枚举项`)
-          elems.forEach((e, j) => {
-            if (e.value === '' || e.value == null || !String(e.key || '').trim()) {
-              errors.push(`${at}.elements[${j}] 每项需含 value 与 key（key 为展示文本）`)
-            }
-          })
-        }
-      }
-    })
-  }
-
-  const clean = (list) =>
-    list
-      .filter((item) => String(item.key || '').trim())
-      .map((item) => {
-        const out = { key: String(item.key).trim(), name: String(item.name).trim() }
-        if (item.type) out.type = item.type
-        if (item.unit !== undefined && item.unit !== '') out.unit = item.unit
-        if (item.access) out.access = item.access
-        if (item.min !== '' && item.min != null) out.min = Number(item.min)
-        if (item.max !== '' && item.max != null) out.max = Number(item.max)
-        if (item.step !== '' && item.step != null) out.step = Number(item.step)
-        if (item.type === 'enum' && Array.isArray(item.elements) && item.elements.length) {
-          out.elements = item.elements
-            .filter((e) => e.value !== '' && e.value != null && String(e.key || '').trim())
-            .map((e) => {
-              const v = String(e.value).trim()
-              return { value: /^-?\d+(\.\d+)?$/.test(v) ? Number(v) : v, key: String(e.key).trim() }
-            })
-        }
-        return out
-      })
-
-  return {
-    errors,
-    tsl: {
-      properties: clean(properties.value),
-      events: events.value
-        .filter((e) => String(e.key || '').trim())
-        .map((e) => ({ key: String(e.key).trim(), name: String(e.name).trim(), type: e.type || 'info' })),
-      services: services.value
-        .filter((s) => String(s.key || '').trim())
-        .map((s) => ({
-          key: String(s.key).trim(),
-          name: String(s.name).trim(),
-          callType: s.callType || 'async',
-          inputData: (s.inputData || []).filter((p) => String(p.key || '').trim()),
-          outputData: (s.outputData || []).filter((p) => String(p.key || '').trim())
-        }))
-    }
-  }
-}
 
 async function save() {
-  const { errors, tsl: t } = buildTsl()
+  const { errors, tsl: t } = buildTsl({ properties: properties.value, events: events.value, services: services.value })
   if (errors.length) {
     ElMessage.error(errors[0])
     return
