@@ -44,7 +44,14 @@
             </el-descriptions-item>
             <el-descriptions-item label="最后在线时间">{{ device?.last_online_at || '-' }}</el-descriptions-item>
             <el-descriptions-item label="物模型">
-              {{ tsl ? `${(tsl.properties || []).length} 属性 · ${(tsl.services || []).length} 服务` : '-' }}
+              <!-- 设备的物模型是**产品的继承视图**：能看不能改。
+                   原先这里只显示"N 属性 · M 服务"，既不说来源也不给出口 ——
+                   用户想加个属性会在这里找半天（死胡同）。点明继承关系 + 给一个直达入口。 -->
+              <div class="tsl-inherit">
+                <span>{{ tsl ? `${(tsl.properties || []).length} 属性 · ${(tsl.services || []).length} 服务` : '-' }}</span>
+                <span class="muted">继承自产品</span>
+                <el-button link type="primary" size="small" @click="goProductTsl">查看 / 修改</el-button>
+              </div>
             </el-descriptions-item>
           </el-descriptions>
         </div>
@@ -295,6 +302,19 @@ const productName = computed(() => {
   const p = products.value.find((x) => x.product_key === device.value?.product_key)
   return p ? p.name : device.value?.product_key || '-'
 })
+
+/**
+ * 跳到「产品详情 → 物模型」。
+ *
+ * 设备的物模型继承自产品（同一个产品下所有设备共用一份 TSL），
+ * 所以增删属性只能在产品侧做 —— 这里给设备详情页一个直达出口，
+ * 免得用户在这个只读视图里找编辑按钮。
+ */
+function goProductTsl() {
+  const pk = device.value?.product_key
+  if (!pk) return
+  router.push({ path: `/products/${pk}`, query: { tab: 'tsl' } })
+}
 
 let pollTimer = null
 
@@ -808,5 +828,11 @@ onBeforeUnmount(() => {
   .debug-log-panel {
     height: 380px;
   }
+}
+/* 设备信息里「物模型」那一行：数量 + 继承说明 + 跳转，三者一行放得下 */
+.tsl-inherit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 </style>
