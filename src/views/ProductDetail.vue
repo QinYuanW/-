@@ -127,6 +127,9 @@
             </el-table-column>
           </el-table>
           <el-button size="small" class="add-btn" @click="addProperty">+ 加一个属性</el-button>
+          <!-- 常用属性库：温度/湿度/电压这些属性的定义（单位、类型、量程）在行业里几乎有共识，
+               与其让用户手敲，不如列出来勾选。与「+ 加一个属性」并存：冷门属性和自定义单位仍需手填。 -->
+          <el-button size="small" class="add-btn" :icon="List" @click="propPickerRef?.open()">从常用属性添加</el-button>
 
           </div>
           <div v-show="tslSection === 'events'">
@@ -337,6 +340,8 @@
     </el-dialog>
     <!-- 通用物模型模板选择（只把结果交给编辑区，不直接落库） -->
     <TslTemplateDialog ref="tplRef" @apply="onTemplateApply" />
+    <!-- 常用属性库（多选后追加到属性表，同样只改编辑区，点保存才落库） -->
+    <CommonPropertyDialog ref="propPickerRef" :existing-keys="existingPropKeys" @confirm="onAddCommonProperties" />
   </div>
 </template>
 
@@ -344,11 +349,12 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Back, Download, Upload, MagicStick, CollectionTag } from '@element-plus/icons-vue'
+import { Back, Download, Upload, MagicStick, CollectionTag, List } from '@element-plus/icons-vue'
 import { listProducts, getProductTsl, updateProductTsl, listDevices, createTslTemplate } from '../api'
 import { formatTime } from '../utils/export'
 import { mergeTsl } from '../constants/tslTemplates'
 import TslTemplateDialog from '../components/TslTemplateDialog.vue'
+import CommonPropertyDialog from '../components/CommonPropertyDialog.vue'
 
 const route = useRoute()
 const key = computed(() => route.params.key)
@@ -428,6 +434,26 @@ async function saveAsTemplate() {
   } catch (e) {
     // 拦截器已提示
   }
+}
+
+// ===== 常用属性库（往现有物模型上补单个属性）=====
+const propPickerRef = ref()
+
+/**
+ * 当前编辑区已有的属性 key。
+ *
+ * 传给弹窗用于**禁用已存在的项** —— 后端校验里 key 是「三段之间全局唯一」，
+ * 若放任重复添加，用户会一路填到点保存时才被拦下，那时已白填一堆。
+ */
+const existingPropKeys = computed(() =>
+  properties.value.map((p) => String(p.key || '').trim()).filter(Boolean)
+)
+
+function onAddCommonProperties(rows) {
+  if (!rows.length) return
+  properties.value = [...properties.value, ...rows]
+  tslSection.value = 'properties'
+  ElMessage.success(`已添加 ${rows.length} 个常用属性，点「保存物模型」才会落库`)
 }
 
 // ===== 通用物模型模板 =====
