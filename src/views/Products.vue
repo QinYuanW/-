@@ -92,24 +92,37 @@
           <el-form-item label="product_key">
             <el-input v-model="createForm.product_key" placeholder="留空自动生成 p_xxxxxxxx" />
           </el-form-item>
-          <!-- 通用物模型：创建时就能带上属性/事件/服务，省掉"先建空产品 → 进详情 → 再套模板"三步 -->
+          <!-- 通用物模型：创建时就能带上属性/事件/服务，省掉"先建空产品 → 进详情 → 再套模板"三步。
+               用**弹窗**挑而不是下拉框 —— 下拉只能看到名字，弹窗能预览属性/事件/服务明细
+               （用户挑模板时真正想知道的是"里面有什么"）。 -->
           <el-form-item label="初始物模型">
-            <el-select v-model="createForm.template_id" placeholder="留空 = 空白物模型" clearable style="width: 100%">
-              <el-option
-                v-for="t in TSL_TEMPLATES"
-                :key="t.id"
-                :value="t.id"
-                :label="t.name + '（' + templateSummary(t) + '）'"
+            <div class="tpl-pick">
+              <el-input
+                :model-value="pickedTemplate ? pickedTemplate.name : ''"
+                placeholder="留空 = 空白物模型"
+                readonly
+                class="tpl-pick-input"
               />
-            </el-select>
+              <el-button @click="tplPickerRef?.open()">
+                {{ pickedTemplate ? '换一个' : '选择模板' }}
+              </el-button>
+              <el-button v-if="pickedTemplate" text @click="createForm.template_id = ''">清除</el-button>
+            </div>
+            <div v-if="pickedTemplate" class="tpl-pick-hint">
+              {{ pickedTemplate.source === 'custom' ? '我的模板' : '内置模板' }} · {{ templateSummary(pickedTemplate) }}
+              —— 建好后仍可在产品详情的物模型页继续改
+            </div>
           </el-form-item>
         </el-form>
       <template #footer>
         <el-button @click="createVisible = false">取消</el-button>
         <el-button type="primary" :loading="creating" @click="doCreate">创建</el-button>
       </template>
-    </el-dialog>
-    <!-- 7.5：复制产品（连物模型一起带走，用于"再开一个同型号产品"这种复用场景） -->
+      </el-dialog>
+
+      <!-- 挑初始物模型：与「物模型」页、产品详情共用同一个弹窗组件（pickMode = 只选用，不覆盖/追加） -->
+      <TslTemplateDialog ref="tplPickerRef" :custom-templates="customTemplates" pick-mode @apply="onPickTemplate" />
+      <!-- 7.5：复制产品（连物模型一起带走，用于"再开一个同型号产品"这种复用场景） -->
     <el-dialog v-model="copyVisible" title="复制产品" width="460px">
       <div class="rename-tip">
         会连**物模型一起复制**（属性 / 事件 / 服务），但**不复制设备** ——
@@ -164,10 +177,12 @@ import {
   updateProductStatus,
   renameProduct,
   deleteProduct,
-  listDevices
+  listDevices,
+  listTslTemplates
 } from '../api'
 import { formatTime } from '../utils/export'
-import { TSL_TEMPLATES, templateSummary, findTemplate, cloneTsl } from '../constants/tslTemplates'
+import { UNIFIED_BUILTIN, templateSummary, cloneTsl, toUnifiedCustom } from '../constants/tslTemplates'
+import TslTemplateDialog from '../components/TslTemplateDialog.vue'
 
 const router = useRouter()
 
@@ -183,6 +198,39 @@ const productSearch = ref('')
 const createVisible = ref(false)
 const creating = ref(false)
 const createForm = reactive({ name: '', product_key: '', template_id: '' })
+
+// ===== 通用物模型（挑初始物模型）=====
+const tplPickerRef = ref()
+/** 用户自定义模板（后端 VO），传给弹窗与内置模板合并展示 */
+const customTemplates = ref([])
+
+/**
+ * 把「统一 id」还原成模板对象。
+ *
+ * 内置模板 id 形如 `temp_humidity`；自定义的是 `custom_<后端id>`（见 constants 里的约定）——
+ * 两套 id 有前缀区分，所以能安全地一次查完两边。
+ */
+const pickedTemplate = computed(() => {
+  const id = createForm.template_id
+  if (!id) return null
+  const b = UNIFIED_BUILTIN.find((t) => t.id === id)
+  if (b) return b
+  return customTemplates.value.map(toUnifiedCustom).find((t) => t.id === id) || null
+})
+
+async function loadCustomTemplates() {
+  try {
+    const res = await listTslTemplates()
+    customTemplates.value = res.data?.items || []
+  } catch (e) {
+    customTemplates.value = []
+  }
+}
+
+/** 弹窗回吐统一 id，直接存下即可（不再靠名字/结构反查 —— 那样同名或同结构会误配） */
+function onPickTemplate({ templateId }) {
+  createForm.template_id = templateId || ''
+}
 
 const filteredProducts = computed(() => {
   const kw = productSearch.value.trim().toLowerCase()
@@ -386,7 +434,7 @@ async function askDelete(p) {
       if (createForm.product_key.trim()) payload.product_key = createForm.product_key.trim()
       // 选了通用物模型就一并带上（后端 POST /products 本来就接受 tsl）——
       // 省掉"先建空产品 → 进详情 → 再套模板"三步
-      const tpl = createForm.template_id ? findTemplate(createForm.template_id) : null
+      const tpl = pickedTemplate.value
       if (tpl) payload.tsl = cloneTsl(tpl.tsl)
       const res = await createProduct(payload)
       ElMessage.success(
@@ -403,7 +451,11 @@ async function askDelete(p) {
     }
   }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  // 自定义模板也要列进「选择模板」弹窗 —— 上次只列了内置的，用户自己存的模板在建产品时看不到
+  loadCustomTemplates()
+})
 </script>
 
 <style scoped>
@@ -673,5 +725,28 @@ onMounted(load)
   .tool-search {
     width: 100%;
   }
+}
+/* 新建产品里的「初始物模型」：只读回显 + 选择按钮（挑模板走弹窗，不在这里预览） */
+.tpl-pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.tpl-pick-input {
+  flex: 1;
+}
+
+.tpl-pick :deep(.el-input__inner[readonly]) {
+  cursor: default;
+  color: #1f2937;
+}
+
+.tpl-pick-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.7;
+  color: #9ca3af;
 }
 </style>

@@ -1,5 +1,5 @@
 <template>
-  <el-dialog v-model="visible" title="套用通用物模型" width="880px" top="6vh">
+  <el-dialog v-model="visible" :title="pickMode ? '选择通用物模型' : '套用通用物模型'" width="880px" top="6vh">
     <div class="tpl-body">
       <div class="tpl-list">
         <div
@@ -69,13 +69,14 @@
     <template #footer>
       <div class="tpl-footer">
         <div class="tpl-opts">
-          <!-- 覆盖 vs 追加：默认覆盖更符合"套模板"的直觉；追加用于"在现有基础上补一组标准属性" -->
-          <el-radio-group v-model="mode" size="small">
+          <!-- 「选用」模式（新建产品时挑初始物模型）没有"当前物模型"可覆盖/追加，
+               所以不显示这两个选项 —— 显示了反而让人以为要覆盖什么 -->
+          <el-radio-group v-if="!pickMode" v-model="mode" size="small">
             <el-radio-button value="replace">覆盖当前物模型</el-radio-button>
             <el-radio-button value="append">追加（同名 key 跳过）</el-radio-button>
           </el-radio-group>
 
-          <!-- 只有从「物模型」页进来才需要选目标产品；从产品详情进来时目标已确定 -->
+          <!-- 只有从「物模型」页进来才需要选目标产品；从产品详情/新建产品进来时目标已确定 -->
           <div v-if="products.length" class="tpl-target">
             <span class="lbl">套用到产品</span>
             <el-select v-model="productKey" size="small" placeholder="选择产品" style="width: 200px">
@@ -85,7 +86,9 @@
         </div>
         <div>
           <el-button @click="visible = false">取消</el-button>
-          <el-button type="primary" :disabled="products.length > 0 && !productKey" @click="confirm">套用</el-button>
+          <el-button type="primary" :disabled="products.length > 0 && !productKey" @click="confirm">
+            {{ pickMode ? '选用' : '套用' }}
+          </el-button>
         </div>
       </div>
     </template>
@@ -100,7 +103,9 @@ const props = defineProps({
   /** 传入产品列表 → 变成「直接套用到某产品」模式；不传则只把 tsl 交给父组件填编辑区 */
   products: { type: Array, default: () => [] },
   /** 用户自定义模板（后端 TslTemplateVO 数组）。内置模板组件内部自带。 */
-  customTemplates: { type: Array, default: () => [] }
+  customTemplates: { type: Array, default: () => [] },
+  /** 选用模式：只挑一个模板带回去（新建产品时用），不显示覆盖/追加那组选项 */
+  pickMode: { type: Boolean, default: false }
 })
 const emit = defineEmits(['apply'])
 
@@ -130,6 +135,9 @@ function open(templateId) {
 function confirm() {
   emit('apply', {
     tsl: cloneTsl(selected.value.tsl),
+    // 统一 id 也带上：调用方（如新建产品）不必靠"名字 + JSON 比对"去反查是哪一项
+    templateId: selected.value.id,
+    source: selected.value.source,
     mode: mode.value,
     productKey: productKey.value || null,
     templateName: selected.value.name
