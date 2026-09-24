@@ -78,6 +78,9 @@
           </div>
           <div class="card-actions">
             <el-button size="small" @click="openPreview(t)">查看详情</el-button>
+            <!-- 内置模板不可编辑（随控制台版本走），但用户"想改两个属性"是真实需求。
+                 与其让他绕「套用到产品 → 改 → 存为模板」三步，不如一键复制成自己的模板再改。 -->
+            <el-button size="small" @click="forkTemplate(t)">复制为我的模板</el-button>
             <el-button size="small" type="primary" @click="applyTo(t)">套用到产品</el-button>
           </div>
         </div>
@@ -295,6 +298,49 @@ function openPreview(t) {
 
 function applyTo(t) {
   dlgRef.value?.open(t.id)
+}
+
+/**
+ * 把内置模板复制成「我的模板」。
+ *
+ * <p>为什么要它：内置模板随控制台版本走、**不可编辑**，但"想改两个属性/换个量程"是真实需求。
+ * 原先只能绕「套用到产品 → 改 → 存为模板」三步 —— 既慢，又容易在中途丢改动
+ * （用户可能改完忘了存为模板，或先存了别的东西）。
+ *
+ * <p>复制出来的是**全新的自定义模板**（独立一行、可编辑可删除），与内置那份互不影响。
+ */
+async function forkTemplate(t) {
+  let name = ''
+  try {
+    const r = await ElMessageBox.prompt(
+      '内置模板不可直接编辑（随控制台版本提供）。复制一份成你自己的模板，之后就能随意改属性与量程。',
+      '复制为我的模板',
+      {
+        confirmButtonText: '复制',
+        cancelButtonText: '取消',
+        inputValue: `${t.name}（副本）`,
+        inputPlaceholder: '新模板名称',
+        inputValidator: (v) => (v && String(v).trim() ? true : '模板名称不能为空')
+      }
+    )
+    name = String(r.value || '').trim()
+  } catch (e) {
+    return // 用户取消
+  }
+  try {
+    await createTslTemplate({
+      name,
+      category: t.category || null,
+      description: `从内置模板「${t.name}」复制`,
+      tsl: cloneTsl(t.tsl)
+    })
+    ElMessage.success(`已复制为「${name}」—— 在「我的模板」里可直接编辑`)
+    await loadTemplates()
+    // 复制完把视线带到自己的模板上（否则用户还在内置区里找"我刚建的那个"）
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  } catch (e) {
+    // 拦截器已提示
+  }
 }
 
 /**
