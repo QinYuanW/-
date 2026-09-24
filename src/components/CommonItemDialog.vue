@@ -1,8 +1,8 @@
 <template>
-  <el-dialog v-model="visible" title="添加常用属性" width="780px" top="6vh">
+  <el-dialog v-model="visible" :title="meta.title" width="820px" top="6vh">
     <div class="cp-head">
-      <el-input v-model="keyword" placeholder="搜索 key 或名称，如 temperature / 温度" clearable :prefix-icon="Search" />
-      <span class="cp-sum">{{ catalogSummary() }}</span>
+      <el-input v-model="keyword" :placeholder="`搜索 key 或名称，如 ${hintKey}`" clearable :prefix-icon="Search" />
+      <span class="cp-sum">{{ catalogSummary(kind) }}</span>
     </div>
 
     <div class="cp-body">
@@ -16,31 +16,35 @@
             :class="{ picked: picked.has(item.key), disabled: exists(item.key) }"
             @click="toggle(item)"
           >
-            <el-checkbox
-              :model-value="picked.has(item.key)"
-              :disabled="exists(item.key)"
-              @click.stop
-              @change="toggle(item)"
-            />
+            <el-checkbox :model-value="picked.has(item.key)" :disabled="exists(item.key)" @click.stop @change="toggle(item)" />
             <div class="cp-main">
               <div class="cp-line1">
                 <span class="cp-name">{{ item.name }}</span>
                 <span class="cp-key">{{ item.key }}</span>
                 <span v-if="exists(item.key)" class="cp-badge exist">已存在</span>
-                <span v-else-if="item.access === 'readwrite'" class="cp-badge rw">可写</span>
+                <span v-else-if="kind === 'properties' && item.access === 'readwrite'" class="cp-badge rw">可写</span>
+                <span v-else-if="kind === 'events'" class="cp-badge" :class="eventClass(item.type)">{{ eventLabel(item.type) }}</span>
+                <span v-else-if="kind === 'services'" class="cp-badge">{{ item.callType === 'sync' ? '同步' : '异步' }}</span>
               </div>
               <div class="cp-line2">
-                <span>{{ item.type }}</span>
-                <span v-if="item.unit">· {{ item.unit }}</span>
-                <span v-if="rangeText(item)">· {{ rangeText(item) }}</span>
-                <span v-if="item.note" class="cp-note">· {{ item.note }}</span>
+                <template v-if="kind === 'properties'">
+                  <span>{{ item.type }}</span>
+                  <span v-if="item.unit">· {{ item.unit }}</span>
+                  <span v-if="rangeText(item)">· {{ rangeText(item) }}</span>
+                </template>
+                <template v-else-if="kind === 'services'">
+                  <span v-if="(item.inputData || []).length">入参 {{ (item.inputData || []).map((x) => x.key).join(' / ') }}</span>
+                  <span v-else>无入参</span>
+                  <span v-if="(item.outputData || []).length">· 出参 {{ (item.outputData || []).map((x) => x.key).join(' / ') }}</span>
+                </template>
+                <span v-if="item.note" class="cp-note">{{ item.note }}</span>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      <div v-if="!visibleGroups.length" class="cp-empty">没有匹配的属性（换个关键词试试）</div>
+      <div v-if="!visibleGroups.length" class="cp-empty">没有匹配的项（换个关键词试试）</div>
     </div>
 
     <template #footer>
@@ -58,31 +62,46 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { Search } from '@element-plus/icons-vue'
-import { COMMON_PROPERTIES, PROPERTY_GROUPS, catalogSummary, toPropertyRow } from '../constants/tslProperties'
+import { CATALOGS, catalogSummary, itemsOf, toRow } from '../constants/tslCommon'
 
+/**
+ * 常用项库弹窗（属性 / 事件 / 服务三类共用）。
+ *
+ * <h3>为什么三类用一个组件</h3>
+ * 三类的**交互完全一样**（分组 + 搜索 + 多选 + 已存在禁用），只有"每行展示什么信息"不同。
+ * 写三个组件会让搜索、禁用、多选这些逻辑各存一份 —— 和 `TslEditor` 抽出来是同一个理由。
+ * 差异收敛在 `kind` 上：标题、分组、条目、行内展示、输出形状。
+ *
+ * <h3>已存在的 key 直接禁用</h3>
+ * 后端 `TslValidator` 要求 key 在**三类之间全局唯一**。若放任重复添加，
+ * 用户会一路填到点保存才被拦下 —— 那时已白填一堆。
+ */
 const props = defineProps({
-  /** 当前物模型里已有的属性 key —— 已有的在弹窗里禁用并标「已存在」，避免加完保存时报 key 重复 */
+  /** 当前编辑区里已有的对应 key（用于禁用重复项） */
   existingKeys: { type: Array, default: () => [] }
 })
 const emit = defineEmits(['confirm'])
 
 const visible = ref(false)
+const kind = ref('properties')
 const keyword = ref('')
 const picked = ref(new Set())
+
+const meta = computed(() => CATALOGS[kind.value] || CATALOGS.properties)
+const hintKey = computed(() => (kind.value === 'properties' ? 'temperature' : kind.value === 'events' ? 'alarm' : 'reboot'))
 
 const exists = (key) => props.existingKeys.includes(key)
 
 const matched = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
-  if (!kw) return COMMON_PROPERTIES
-  return COMMON_PROPERTIES.filter(
-    (x) => x.key.toLowerCase().includes(kw) || x.name.toLowerCase().includes(kw)
-  )
+  const items = itemsOf(kind.value)
+  if (!kw) return items
+  return items.filter((x) => x.key.toLowerCase().includes(kw) || x.name.toLowerCase().includes(kw))
 })
 
 /** 只显示"有匹配项"的分组，搜索时不出现一堆空分组 */
 const visibleGroups = computed(() =>
-  PROPERTY_GROUPS.filter((g) => matched.value.some((x) => x.group === g.key))
+  (meta.value.groups || []).filter((g) => matched.value.some((x) => x.group === g.key))
 )
 
 const byGroup = (groupKey) => matched.value.filter((x) => x.group === groupKey)
@@ -91,6 +110,9 @@ const rangeText = (item) => {
   if (item.min === '' && item.max === '') return ''
   return `${item.min === '' ? '' : item.min} ~ ${item.max === '' ? '' : item.max}`
 }
+
+const eventLabel = (t) => ({ info: '信息', alert: '告警', fault: '故障' }[t] || t)
+const eventClass = (t) => (t === 'alert' ? 'alert' : t === 'fault' ? 'fault' : '')
 
 const skippedCount = computed(() => [...picked.value].filter((k) => exists(k)).length)
 
@@ -102,16 +124,19 @@ function toggle(item) {
   picked.value = s
 }
 
-function open() {
+/** @param which 'properties' | 'events' | 'services' */
+function open(which = 'properties') {
+  kind.value = CATALOGS[which] ? which : 'properties'
   keyword.value = ''
   picked.value = new Set()
   visible.value = true
 }
 
 function confirm() {
-  // 只回吐"当前还存在的"和"未选中的" —— 已存在的不发回去，调用方也就不用再判一次
-  const rows = COMMON_PROPERTIES.filter((x) => picked.value.has(x.key) && !exists(x.key)).map(toPropertyRow)
-  emit('confirm', rows)
+  const rows = itemsOf(kind.value)
+    .filter((x) => picked.value.has(x.key) && !exists(x.key))
+    .map((x) => toRow(kind.value, x))
+  emit('confirm', { kind: kind.value, rows })
   visible.value = false
 }
 
@@ -164,7 +189,7 @@ defineExpose({ open })
 
 .cp-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
   gap: 6px;
   margin-top: 6px;
 }
@@ -224,11 +249,23 @@ defineExpose({ open })
   font-size: 10px;
   border-radius: 3px;
   padding: 1px 4px;
+  color: #6b7280;
+  background: #f1efe8;
 }
 
 .cp-badge.rw {
   color: #d85a30;
   background: #faece7;
+}
+
+.cp-badge.alert {
+  color: #a32d2d;
+  background: #fcebeb;
+}
+
+.cp-badge.fault {
+  color: #854f0b;
+  background: #faeeda;
 }
 
 .cp-badge.exist {

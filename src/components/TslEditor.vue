@@ -70,7 +70,7 @@
       <el-button size="small" class="add-btn" @click="addProperty">+ 加一个属性</el-button>
       <!-- 常用属性库：温度/湿度/电压这些属性的定义（单位、类型、量程）在行业里几乎有共识，
            与其让用户手敲，不如列出来勾选。与「+ 加一个属性」并存：冷门属性和自定义单位仍需手填。 -->
-      <el-button size="small" class="add-btn" :icon="List" @click="propPickerRef?.open()">从常用属性添加</el-button>
+      <el-button size="small" class="add-btn" :icon="List" @click="pickerRef?.open('properties')">从常用属性添加</el-button>
     </div>
 
     <!-- ══════════ 事件 ══════════ -->
@@ -100,6 +100,8 @@
         <template #empty><el-empty description="暂无事件" :image-size="50" /></template>
       </el-table>
       <el-button size="small" class="add-btn" @click="addEvent">+ 加一个事件</el-button>
+      <!-- 常用事件：高温告警/离线告警/故障这类是通用套路，key 与 name 有惯例可循 -->
+      <el-button size="small" class="add-btn" :icon="List" @click="pickerRef?.open('events')">从常用事件添加</el-button>
     </div>
 
     <!-- ══════════ 服务 ══════════ -->
@@ -133,6 +135,8 @@
         <template #empty><el-empty description="暂无服务" :image-size="50" /></template>
       </el-table>
       <el-button size="small" class="add-btn" @click="addService">+ 加一个服务</el-button>
+      <!-- 常用服务：设置开关/重启设备这类动作的入参形状也有惯例，连 inputData 一起带出来最省事 -->
+      <el-button size="small" class="add-btn" :icon="List" @click="pickerRef?.open('services')">从常用服务添加</el-button>
     </div>
 
     <p class="hint">
@@ -219,15 +223,15 @@
       </template>
     </el-dialog>
 
-    <!-- 常用属性库 -->
-    <CommonPropertyDialog ref="propPickerRef" :existing-keys="existingPropKeys" @confirm="onAddCommonProperties" />
+    <!-- 常用项库（属性 / 事件 / 服务共用一个，靠 kind 区分） -->
+    <CommonItemDialog ref="pickerRef" :existing-keys="allKeys" @confirm="onAddCommon" />
   </div>
 </template>
 
 <script setup>
 import { ref, computed } from 'vue'
 import { List } from '@element-plus/icons-vue'
-import CommonPropertyDialog from './CommonPropertyDialog.vue'
+import CommonItemDialog from './CommonItemDialog.vue'
 
 /**
  * 物模型编辑器（属性 / 事件 / 服务）。
@@ -257,17 +261,34 @@ const emit = defineEmits(['change'])
 
 const types = ['int', 'float', 'bool', 'string', 'enum']
 
-// ===== 常用属性库 =====
-const propPickerRef = ref()
-/** 已有属性 key：传给弹窗禁用重复项（key 在三段之间全局唯一，放任重复会填到保存才被拦） */
-const existingPropKeys = computed(() =>
-  props.properties.map((p) => String(p.key || '').trim()).filter(Boolean)
+// ===== 常用项库（属性 / 事件 / 服务）=====
+const pickerRef = ref()
+
+/**
+ * 当前已用到的全部 key —— 三类**合在一起**算。
+ *
+ * 后端 `TslValidator` 要求 key 在属性/事件/服务**三类之间**全局唯一
+ * （key 会进 Redis 影子 field 与 MQTT 报文，跨段重名会互相覆盖）。
+ * 所以禁用判断也必须用并集：属性里用了 `switch`，事件里就不该再能用 `switch`。
+ */
+const allKeys = computed(() =>
+  [...props.properties, ...props.events, ...props.services]
+    .map((x) => String(x.key || '').trim())
+    .filter(Boolean)
 )
 
-function onAddCommonProperties(rows) {
+function onAddCommon({ kind, rows }) {
   if (!rows.length) return
-  props.properties.push(...rows)
-  sec.value = 'properties'
+  if (kind === 'events') {
+    props.events.push(...rows)
+    sec.value = 'events'
+  } else if (kind === 'services') {
+    props.services.push(...rows)
+    sec.value = 'services'
+  } else {
+    props.properties.push(...rows)
+    sec.value = 'properties'
+  }
   emit('change')
 }
 
