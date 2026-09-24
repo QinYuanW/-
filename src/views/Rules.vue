@@ -213,9 +213,19 @@
         </el-form-item>
 
         <template v-if="form.actionType === 1">
-          <el-form-item label="下发内容" required>
-            <div class="payload-editor">
-              <div v-for="(row, i) in form.payloadRows" :key="i" class="payload-row">
+            <el-form-item label="下发内容" required>
+              <div class="payload-editor">
+                <!-- 一键预设：告警联动最典型的一步就是"命中后关断"（高温 → 关闸）。
+                     布尔属性只有两个取值，让用户走"选属性 → 选值"两步，不如给一个按钮。 -->
+                <div v-if="boolProps.length" class="payload-presets">
+                  <span class="pp-label">快速填充</span>
+                  <template v-for="p in boolProps" :key="p.key">
+                    <el-button size="small" @click="applyBoolPreset(p, false)">关闭{{ p.name || p.key }}</el-button>
+                    <el-button size="small" @click="applyBoolPreset(p, true)">开启{{ p.name || p.key }}</el-button>
+                  </template>
+                </div>
+
+                <div v-for="(row, i) in form.payloadRows" :key="i" class="payload-row">
                 <el-select
                   v-model="row.key"
                   class="pr-prop"
@@ -277,10 +287,15 @@
                 <span class="payload-tip">规则命中时一次可下发多个属性；设备离线时挂起、上线补发</span>
               </div>
 
-              <div v-if="!writableProps.length" class="payload-warn">
-                该产品物模型里没有「可写（readwrite）」属性，无法配置联动下发。
-                请先到「产品 → 物模型」把要控制的属性设为可写。
-              </div>
+                <div v-if="!writableProps.length" class="payload-warn">
+                  <div>该产品物模型里没有「可写（readwrite）」属性，无法配置联动下发。</div>
+                  <!-- 原先这里只"告诉他去哪"，没给出口 —— 同一天里改的第三个"只读视图"缺口。
+                       补一个直达按钮，并把「从常用属性添加」这条更快的路也点出来。 -->
+                  <div class="pw-foot">
+                    <el-button link type="primary" size="small" @click="goProductTsl">去产品物模型添加可写属性 →</el-button>
+                    <span class="pw-hint">在那里点「从常用属性添加」，选 开关 / 亮度 / 色温 等可写属性即可</span>
+                  </div>
+                </div>
               <div v-else class="payload-preview">
                 生成载荷 <code>{{ payloadPreview }}</code>
               </div>
@@ -315,6 +330,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Refresh, Plus } from '@element-plus/icons-vue'
 import PropertyValueInput from '../components/PropertyValueInput.vue'
@@ -369,6 +385,8 @@ function blankForm() {
 }
 
 /** 当前所选产品在列表里的物模型对象 */
+const router = useRouter()
+
 const currentProduct = computed(() =>
   products.value.find((p) => p.product_key === form.value.productKey)
 )
@@ -402,6 +420,48 @@ const canAddPayloadRow = computed(
 const writableNames = computed(() =>
   writableProps.value.map((p) => p.name || p.key).join('、')
 )
+
+/**
+ * 可写的**布尔**属性 —— 告警联动最典型的目标。
+ *
+ * 为什么单独给它开一键入口：布尔只有两个取值，且"命中后关断/开启"是最常见的一条联动
+ * （高温 → 关闸、水浸 → 关闭电动阀）。走完整交互要「添加属性 → 选属性 → 选值」三步，
+ * 而意图表达出来只有一句"关掉它"。
+ */
+const boolProps = computed(() => writableProps.value.filter((p) => p.type === 'bool'))
+
+/**
+ * 一键填入「某布尔属性 = 某值」。
+ *
+ * 优先级：改已有的同 key 行 → 填掉空行 → 新增一行。
+ * 「填掉空行」这一步是必要的：表单默认就有一个空的「选择可写属性」行，
+ * 若直接新增，用户会看到"上面留个空行、下面才是刚填的" —— 还得自己删空行。
+ */
+function applyBoolPreset(prop, value) {
+  const byKey = form.value.payloadRows.find((r) => r.key === prop.key)
+  if (byKey) {
+    byKey.value = value
+    return
+  }
+  const blank = form.value.payloadRows.find((r) => !r.key)
+  if (blank) {
+    blank.key = prop.key
+    blank.value = value
+    return
+  }
+  if (canAddPayloadRow.value) {
+    form.value.payloadRows.push({ key: prop.key, value })
+    return
+  }
+  ElMessage.info('下发内容已填满，请直接改对应那一行的值')
+}
+
+/** 跳到该产品的物模型页 —— 联动下发依赖"可写属性"，没有时可从这里一步过去 */
+function goProductTsl() {
+  const pk = currentProduct.value?.product_key
+  if (!pk) return
+  router.push({ path: `/products/${pk}`, query: { tab: 'tsl' } })
+}
 
 /** 一行是否已填好（⚠️ bool 的 `false` 是有效值，不能按"假值"丢掉） */
 function rowFilled(r) {
@@ -895,6 +955,33 @@ onMounted(async () => {
   color: #854f0b;
   background: #faeeda;
   border-radius: 6px;
+}
+
+.pw-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.pw-hint {
+  font-size: 11px;
+  color: #b4b2a9;
+}
+
+/* 一键预设：布尔属性只有两个取值，"关断/开启"直接给按钮 */
+.payload-presets {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.pp-label {
+  font-size: 11px;
+  color: #9ca3af;
 }
 
 .payload-preview {
