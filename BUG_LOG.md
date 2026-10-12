@@ -2,6 +2,67 @@
 
 > 每解决一个问题/BUG 立即追加记录：现象 / 场景 / 排查根因 / 状态
 
+## 2026-10-12
+
+### BUG-32：环境不能"一键拉起"——业务库跑在宿主机（Windows 服务），崩了就得提权救
+
+- **现象**：`docker compose up -d` 只起 EMQX / Redis / Kafka / 监控三件套，业务库仍靠宿主机 `MySQL57` Windows 服务。
+  本次准备联调时该服务已是 Stopped，直连报 `ERROR 2003 (10061) Lost/Can't connect`；`net start MySQL57` 报 **系统错误 5 拒绝访问**（非提权 shell）。
+  即：环境"拉起"到一半，卡在数据库上，且**没有权限自己救**。
+- **场景**：2026-10-12 准备把仓库推到 GitHub 前先做环境标准化。用户提要求：「数据库也用 Docker 统一管理，方便环境使用 Docker 一键拉起」。
+- **排查根因**：
+  1. `docker-compose.yml` 当初**刻意**让 MySQL 不进容器（原文注释：MySQL 使用本机 5.7，避免 3306 端口冲突）；
+     代价是整套环境从此依赖宿主机安装 + Windows 服务的稳定性。
+  2. 该服务早有前科：BUG-22 记过 MySQL57 **意外停止**（StartType=Auto 却没自启），恢复必须 UAC 提权。
+  3. 换机器 / 重装系统后，本机 MySQL 安装、数据目录（`D:\AppData\MySQLData`）、`iot` 账号与授权，全部得手工重做一遍 —— 这正是"一键拉起"的反面。
+- **修复**：MySQL 8.0 入栈（`docker-compose.yml` 新增 `mysql` 服务，7 服务拓扑）：
+  - 端口 `3306:3306`、`mysql_data` 卷持久化；`TZ=Asia/Shanghai` + `--default-time-zone=+08:00`（对齐 JDBC `serverTimezone=Asia/Shanghai`，否则时间戳整体偏 8 小时）；
+    `--character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci`（对齐 schema，规避 8.0 默认 `utf8mb4_0900_ai_ci` 引发的 *Illegal mix of collations*）。
+  - 初始化脚本按**文件名顺序** bind mount 进 `/docker-entrypoint-initdb.d`（只在数据卷为空的首发时各跑一次）：
+    `01-schema`（建库建表）→ `02-init-user`（建 `iot` 账号并**显式钉 `mysql_native_password`**，让 5.7 时代的 mysql.exe / 旧 Navicat 也能连）→ `03-seed`（演示数据）→ `04-admin`（新增，见下）。
+  - **新增 `db/init-admin.sql`**：seed 刻意不预置 user（BCrypt 无法离线造值），于是全新库里没有 admin —— 控制台登录必然 4010，与 BUG-5 是同一处坑。
+    改为用**后端同款** `BCryptPasswordEncoder`（spring-security-crypto 6.2.4，cost=10）现场生成 `admin/admin123` 的哈希，
+    并以 `matches("admin123")=true` / `matches("wrong")=false` 双向校验通过后才写进脚本（非明文、非猜测值）；`ON DUPLICATE KEY UPDATE id=id` 保证幂等，不回滚用户自己改过的密码。
+  - 文档同步：`docs/06_运维监控/端口与访问清单.md`（3306 归属、凭据表、常见操作、Grafana 持久化说明）、`docs/项目结构快照.md`、`docs/后端代码完全解读.md`、`application.yml` 数据源注释。
+- **验证**（逐项实测）：
+  - 容器 `Up (healthy)`；`docker compose up -d` **七个容器全部拉起**；
+  - `iot_platform` **12 张表**齐全；`device_telemetry` **13 个分区**，索引 `PRIMARY(id,ts)` / `uk_device_prop_val_ts`(唯一) / `idx_device_prop_ts` / `idx_device_ts` 与设计一致；
+  - `@@character_set_server=utf8mb4`、`@@collation_server=utf8mb4_unicode_ci`、`@@time_zone=+08:00`，`NOW(3)` 返回本地时间；
+    ⚠️ 当时我还顺手"验证"了中文默认值 `device_rule.alarm_type='规则告警'` 并判定"没被写坏"——**那个结论是错的**，见下方 BUG-33；
+  - seed 生效（project / product / device 各 1 行）；`user` 表 admin 行 `password_hash` **60 字符、`$2a$10$` 前缀**，role=1 / status=1 / deleted=0；
+  - 宿主机 5.7 客户端以 `iot@%` 走 TCP 连容器 **8.0.46** 成功 → 旧客户端兼容性成立。
+- **遗留（需人工一步）**：宿主机 `MySQL57` 当前 Stopped 但 `StartType=Automatic` —— **机器一重启就会抢 3306，容器起不来**。
+  需**管理员** PowerShell 执行：`net stop MySQL57` + `sc config MySQL57 start= disabled`。
+- **状态**：✅ 已解决（遗留停用步骤待用户提权执行）
+
+### BUG-33：MySQL 容器化后所有中文变乱码 —— 客户端字符集默认 latin1，把 UTF-8 字节当 latin1 读进来
+
+- **现象**：BUG-32 建库完成后跑首次全链路验证，`GET /api/v1/devices` 返回 `"device_name":"å®¢åŽ…æ¸©æ¹¿åº¦è®¡"`；
+  库里 `HEX(device_name)` = `C3A5C2AEC2A2C3A5C5BDE280A6…` —— 正是 `客厅温湿度计` 的 UTF-8 字节（`E5AEA2E58E85E6B8A9…`）被做了一次 latin1 → utf8mb4 转换后的**双重编码**。
+- **场景**：2026-10-12，MySQL 入栈（BUG-32）后的验证阶段发现；影响 `project.name` / `product.name` / `product.tsl` / `device.device_name` 等所有中文。
+- **排查根因**（含一次被自己"验证通过"骗过去的经历）：
+  1. **假阳性**：第一轮我用 `information_schema.columns.column_default` 查中文默认值，终端显示 `规则告警`，据此判定中文没坏。
+     **这个判定是错的** —— 查库用的 `docker exec mysql mysql` 客户端**同样是 latin1**，`character_set_results=latin1` 又把库里的双重编码 utf8mb4 转回 latin1 字节，落到终端恰好还原成正确的 UTF-8。
+     存储端与读取端的编码错误**对称抵消**，肉眼看到的刚好是对的。**只有 `HEX()` 不说谎。**
+  2. **真根因**：`/docker-entrypoint-initdb.d/*.sql` 是 **mysql 客户端**读文件后把语句发给服务端的，"文件里的 UTF-8 字节怎么被解释"由**客户端**的 `default-character-set` 决定。
+     mysql:8.0 镜像里没有 UTF-8 locale，客户端实测协商成 **latin1**（`SHOW VARIABLES LIKE 'character_set_client'` → latin1），于是 seed 里的 `客厅温湿度计` 被当 latin1 解释、再转 utf8mb4 存库。
+     ⚠️ 这一环**只设 `--character-set-server` 完全治不了**（那只管服务端默认值）。
+  3. **第一版修法也失败**：我挂了 `db/my.cnf` 到 `/etc/mysql/conf.d/` 并写 `[client] default-character-set=utf8mb4`，结果无效 —— 容器日志明确报
+     `World-writable config file '/etc/mysql/conf.d/zz-iot.cnf' is ignored`。Windows bind mount 进去的权限是 `-rwxrwxrwx`，而 MySQL 拒读任何 world-writable 配置文件（mysqld 和客户端**都**拒）。
+     佐证：`@@time_zone` 同时退回 `SYSTEM`，说明**整份配置压根没被读**。
+- **修复**：改用**服务端语句**声明，彻底不依赖客户端默认值 —— 在 4 个初始化脚本开头统一加 `SET NAMES utf8mb4;`
+  （`db/schema.sql`、`db/seed.sql`、`db/init-user.sql`、`db/init-admin.sql`），并把缘由写进文件注释；
+  `[mysqld]` 的字符集/排序规则/时区仍走 compose 的 `command:` 参数（实测有效）。
+  **结论：Windows + Docker Desktop 下不要指望 bind-mount 的 `.cnf` 会被 MySQL 读取。**
+- **验证**（逐字节核对）：
+  - `HEX(device_name)` = `E5AEA2E58E85E6B8A9E6B9BFE5BAA6E8AEA1`，与 `客厅温湿度计` 的 UTF-8 字节**完全一致**（不再是 `C3A5C2AE…`）；
+  - `project.name` = `演示项目`（`E6BC94E7A4BAE9A1B9E79BAE`）、`device_rule.alarm_type` 默认值 = `规则告警`（`E8A784E58899E5918AE8ADA6`）；
+  - 接口响应**原始字节**（按 UTF-8 解码）含 `"device_name":"客厅温湿度计"`；
+  - 浏览器实测控制台：设备列表逐字显示「客厅温湿度计」，项目/产品/菜单中文全部正常，无 console error；
+  - 容器日志不再出现 `World-writable ... is ignored`。
+- **教训**：**验证中文是否乱码必须看 `HEX`，不能看终端显示** —— 读写两端字符集一致时错误会对称抵消，"显示正常"恰恰可能是假象。
+- **状态**：✅ 已解决
+
 ## 2026-09-21
 
 ### BUG-31：B3 大盘 18 个面板里 **4 块"看着在、其实没数据"**

@@ -7,6 +7,12 @@
 --   所有接口入参出参、EMQX 回调报文、Webhook 解析逻辑都以此为准。
 -- 先签合同，再写代码。
 --
+-- ★ 首行 SET NAMES 不是可选项：本文件里有中文列注释与中文默认值（如 '规则告警'）。
+--   MySQL 客户端默认字符集取决于运行环境 locale —— docker 的 mysql:8.0 镜像里实测协商成
+--   latin1，会把文件里的 UTF-8 字节按 latin1 解释再转 utf8mb4 存库，中文全变双重编码乱码。
+--   用服务端语句显式声明本会话按 utf8mb4 解析，比依赖客户端默认值稳（对外部 CLI/Navicat 同样有效）。
+SET NAMES utf8mb4;
+--
 -- ★ 本文件是**唯一**的建表定义源（single source of truth）。
 --   2026-09-17「DDL 归位」：原 `db/create_all.sql`、`db/run.sql`、`db/temp_device.sql`
 --   都是 device 等表的残缺副本（漏列、漏表、device_secret 仍为 64），已全部删除，

@@ -1,10 +1,52 @@
 # ============================================================
 # 物联网 PaaS 云平台 · MVP 基础设施编排
-# 仅 EMQX + Redis（MySQL 使用本机 5.7，避免 3306 端口冲突）
+# EMQX + Redis + MySQL 8.0 + Prometheus/Grafana/Alertmanager + Kafka
 # 用法：docker compose up -d
+#   建库建表 + 演示数据 + admin 账号全部自动完成，无需再手工跑 SQL。
+#
+# F5（2026-10-12）：MySQL 入栈。原先刻意"不进容器"（避 3306 冲突），代价是：
+#   ① 本机 MySQL57(Windows 服务) 多次意外停止（BUG-22），恢复要管理员提权 net start；
+#   ② 换机器就得重装重配，环境无法一键拉起。
+#   ⚠️ 入栈后 3306 归容器，**本机 MySQL57 服务必须停用并置为禁用**（否则端口冲突起不来）。
+#   见 docs/06_运维监控/端口与访问清单.md
 # ============================================================
 
 services:
+  # 业务库：MySQL 8.0（DDL 与 5.7 双兼容，见 db/schema.sql 头部）
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      # root 口令沿用本机 5.7 时代的值，旧脚本/旧习惯无痛切换（仅本地开发）
+      - MYSQL_ROOT_PASSWORD=123456
+      - TZ=Asia/Shanghai
+    command:
+      # 服务端默认字符集对齐 db/schema.sql：8.0 默认是 utf8mb4_0900_ai_ci，
+      # 与既有库的 utf8mb4_unicode_ci 不一致，跨表/跨库比较会报 "Illegal mix of collations"。
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      # 时区对齐后端 JDBC 的 serverTimezone=Asia/Shanghai：
+      # 否则 CURRENT_TIMESTAMP(3) 落的是 UTC，所有时间戳整体偏 8 小时。
+      - --default-time-zone=+08:00
+    volumes:
+      - mysql_data:/var/lib/mysql
+      # 初始化脚本：仅在**数据卷为空**（首次建库）时，按文件名顺序各执行一次。
+      # 顺序不可乱：schema 建库建表 → init-user 建账号授权 → seed 演示数据 → init-admin 管理员。
+      # ⚠️ 建过库之后再改这些脚本**不会重跑**；要重建基线：docker compose down -v 再 up。
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./db/init-user.sql:/docker-entrypoint-initdb.d/02-init-user.sql:ro
+      - ./db/seed.sql:/docker-entrypoint-initdb.d/03-seed.sql:ro
+      - ./db/init-admin.sql:/docker-entrypoint-initdb.d/04-admin.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p123456"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
   emqx:
     image: emqx/emqx:5.8
     container_name: emqx
@@ -114,6 +156,7 @@ services:
       - kafka_data:/var/lib/kafka/data
 
 volumes:
+  mysql_data:
   emqx_data:
   emqx_log:
   redis_data:
