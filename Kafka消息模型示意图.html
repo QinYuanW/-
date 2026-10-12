@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kafka 是什么 & 消息模型示意图</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px 16px; background: #f7f8fa; font-family: "Microsoft YaHei", system-ui, sans-serif; color: #1f2329; }
+  .title { text-align: center; font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+  .subtitle { text-align: center; font-size: 14px; color: #5a6270; margin-bottom: 22px; }
+  .section { max-width: 780px; margin: 0 auto 22px; }
+  .section h3 { font-size: 16px; color: #1f2329; margin: 0 0 10px; }
+  .producers { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; margin-right: 8px; }
+  .prod { background: #eaf1ff; border: 2px solid #2f6fed; border-radius: 8px; padding: 6px 14px; font-size: 13px; font-weight: 700; color: #2f6fed; white-space: nowrap; }
+  .topic { background: #fff; border: 2px solid #1f2329; border-radius: 10px; padding: 12px 16px; text-align: center; max-width: 380px; margin: 0 auto; }
+  .topic .tname { font-size: 15px; font-weight: 700; }
+  .topic .s { font-size: 12px; color: #5a6270; margin-top: 2px; }
+  .chips { display: flex; justify-content: center; gap: 10px; margin-top: 8px; }
+  .chip { background: #eef6ff; border: 1px solid #2f6fed; border-radius: 6px; padding: 4px 14px; font-size: 13px; font-weight: 700; color: #2f6fed; }
+  .flow { display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; }
+  .pub { font-size: 13px; font-weight: 700; color: #2f6fed; text-align: center; }
+  .arrow { font-size: 22px; color: #475467; }
+  .groups { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; margin-top: 14px; }
+  .group { flex: 1 1 300px; min-width: 270px; max-width: 380px; background: #fff; border-radius: 12px; padding: 14px; border: 2px solid #e2e6ec; }
+  .group .gname { font-size: 14px; font-weight: 700; margin-bottom: 10px; }
+  .group.a { border-color: #0e9f6e; }
+  .group.a .gname { color: #0e9f6e; }
+  .group.b { border-color: #b54708; }
+  .group.b .gname { color: #b54708; }
+  .consumer { background: #f2f4f7; border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; font-size: 13px; line-height: 1.7; }
+  .consumer b { color: #1f2329; }
+  .consumer .p { color: #2f6fed; font-weight: 700; }
+  .group.b .consumer .p { color: #b54708; }
+  .tag { font-size: 12px; color: #5a6270; line-height: 1.7; }
+  .tag b { color: #1f2329; }
+  .table { width: 100%; background: #fff; border: 1px solid #e2e6ec; border-radius: 10px; overflow: hidden; }
+  .row { display: flex; flex-wrap: wrap; font-size: 13px; border-top: 1px solid #eef1f5; }
+  .row:first-child { border-top: none; }
+  .row .k2 { flex: 0 0 170px; padding: 9px 14px; font-weight: 700; background: #fafbfc; color: #1f2329; }
+  .row .v { flex: 1 1 240px; padding: 9px 14px; color: #333a45; line-height: 1.6; }
+  .card { background: #eef6ff; border: 1px dashed #2f6fed; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #1f3d7a; line-height: 1.8; }
+</style>
+</head>
+<body>
+
+<div class="title">Kafka：分布式事件流平台</div>
+<div class="subtitle">消息模型 = 主题发布订阅 + 消费者组内的队列语义</div>
+
+<div class="section">
+  <h3>① 整体结构：发布 → 主题（分区） → 消费者组拉取</h3>
+  <div class="flow">
+    <div class="producers">
+      <div class="prod">生产者 1</div>
+      <div class="prod">生产者 2</div>
+      <div class="prod">生产者 3</div>
+    </div>
+    <div class="pub">发布<br>Publish</div>
+    <div class="arrow">→</div>
+    <div class="topic">
+      <div class="tname">Topic: orders</div>
+      <div class="s">持久化日志 · 可回溯</div>
+      <div class="chips"><div class="chip">P0</div><div class="chip">P1</div><div class="chip">P2</div></div>
+    </div>
+    <div class="arrow">→</div>
+    <div style="font-size:13px;font-weight:700;color:#5a6270;text-align:center;">消费者<br>Pull 拉取</div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>② 同一主题 + 不同消费者组 = 两种消息语义</h3>
+  <div class="groups">
+    <div class="group a">
+      <div class="gname">Group A：order-service（同一组）</div>
+      <div class="consumer"><b>消费者 A1</b> → <span class="p">P0</span></div>
+      <div class="consumer"><b>消费者 A2</b> → <span class="p">P1、P2</span></div>
+      <div class="tag"><b>队列 / 点对点语义</b><br>同组内分摊分区，一条消息只被组内一个消费者处理，不重复消费</div>
+    </div>
+    <div class="group b">
+      <div class="gname">Group B：audit-service（不同组）</div>
+      <div class="consumer"><b>消费者 B1</b> → <span class="p">P0、P1</span></div>
+      <div class="consumer"><b>消费者 B2</b> → <span class="p">P2</span></div>
+      <div class="tag"><b>发布 / 订阅语义</b><br>每个组各自维护 offset，各自消费全量数据，互不影响</div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>③ 与常见中间件的定位对比</h3>
+  <div class="table">
+    <div class="row"><div class="k2">Kafka</div><div class="v">主题 + 消费者组 → 同时具备队列与发布订阅语义；高吞吐、可回溯、持久化</div></div>
+    <div class="row"><div class="k2">MQTT</div><div class="v">纯发布/订阅，经 Broker 按主题路由，轻量，面向 IoT 设备</div></div>
+    <div class="row"><div class="k2">RabbitMQ</div><div class="v">队列为主 + 交换机路由，灵活但吞吐低于 Kafka</div></div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>④ 两个易误解的点</h3>
+  <div class="card">
+    <b>消息是"拉"不是"推"</b>：消费者主动向 Broker 拉数据，处理速度自己掌控，天然支持批量消费；<br>
+    <b>消息不会消费完就消失</b>：持久化在分区日志里，靠 offset 记录进度，可重置 offset 从头回溯重读 —— 这也是 Kafka 能做流处理和事件溯源的基础。
+  </div>
+</div>
+
+</body>
+</html>
