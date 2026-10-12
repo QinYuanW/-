@@ -67,10 +67,10 @@ docker compose up -d
 MySQL **首次启动会自动完成**：建库建表 → 创建 `iot` 专用账号 → 灌入演示数据 → 创建管理员账号。无需手工执行任何 SQL。
 
 ```bash
-# 2. 启动后端（源码在独立仓库，克隆到同级目录即可）
+# 2. 启动后端
 cd iot-platform && mvn spring-boot:run     # 需 JDK 17+；或在 IDEA 中直接运行，端口 8080
 
-# 3. 启动控制台（源码在独立仓库）
+# 3. 启动控制台
 cd iot-console && npm install && npm run dev  # 端口 5173
 ```
 
@@ -145,6 +145,8 @@ docker compose down -v && docker compose up -d
 ```
 .
 ├── docker-compose.yml        # 7 服务编排：一键拉起整套环境
+├── iot-platform/             # 后端：Spring Boot 3.2 + Java 17（含完整提交历史）
+├── iot-console/              # 控制台：Vue 3 + Vite 6 + Element Plus（含完整提交历史）
 ├── db/                       # 数据库契约 + 容器初始化脚本（唯一 DDL 事实源）
 ├── monitoring/               # Prometheus 抓取与告警规则、Grafana 大盘 JSON、Alertmanager 配置
 ├── certs/                    # TLS 证书生成脚本与说明（私钥不入库，本地生成）
@@ -173,13 +175,20 @@ docker compose down -v && docker compose up -d
 
 ---
 
-## 仓库边界（重要）
+## 仓库结构（单仓库 · 三模块）
 
-本仓库是**平台侧**：基础设施编排、数据库契约、可观测配置、设备固件与全部设计文档。
+本仓库是**单仓库三模块**：`iot-platform/`（后端）、`iot-console/`（控制台）、以及根目录的平台侧资产（基础设施编排、数据库契约、可观测配置、设备固件与全部设计文档）。
 
-**它不包含后端（Spring Boot）与控制台（Vue）的源码** —— 两者是各自独立的仓库，与本仓库解耦，见 [`.gitignore`](.gitignore) 顶部的说明。原因很实际：三者的演化节奏与技术栈完全不同，混在一个仓库里会让 `docker compose` 的"基础设施"语义被应用代码淹没。
+后端与前端**原先各自是独立仓库**，2026-10-12 以**子树并史**方式并入本仓库 —— 文件与提交历史（后端 47 提交、前端 68 提交）都完整保留，各自的 `.git` 已移除，因此克隆本仓库一次即可拿到全部源码：
 
-因此本仓库可以独立完成一件事：**把平台的地基（库 + 中间件 + 监控 + 契约）原样拉起来**，应用侧按契约接入即可。
+```bash
+git clone <本仓库> && cd <本仓库>
+docker compose up -d                 # 地基建好
+cd iot-platform && mvn spring-boot:run
+cd iot-console  && npm install && npm run dev
+```
+
+合并的理由是它们本就同步演化、彼此以接口契约耦合；分仓时"改一个接口要跨两个仓库提交"的成本高于收益。子目录内各自的 `.gitignore` 继续生效（`target/`、`node_modules/`、`dist/` 不入库）。
 
 ---
 
