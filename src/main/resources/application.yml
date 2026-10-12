@@ -9,7 +9,8 @@ spring:
   application:
     name: iot-platform
 
-  # 数据源：本地 MySQL 5.7（专用账号 iot）
+  # 数据源：MySQL 8.0（docker compose 的 mysql 服务，专用账号 iot）
+  # 宿主机 MySQL57 已停用；容器首发由 db/schema.sql + db/init-user.sql 自动建库建账号
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://localhost:3306/iot_platform?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8&allowPublicKeyRetrieval=true
