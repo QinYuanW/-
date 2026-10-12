@@ -1,8 +1,8 @@
-# ---- 已独立的子仓库（各自有自己的 git 历史，勿�? gitlink 形式纳管�? ----
-/iot-platform/
-/iot-console/
+# ---- 后端 / 前端源码已并入本仓库（2026-10-12 以子树并史方式合并） ----
+# 二者原为各自独立的 git 仓库，现 .git 已移除、提交历史通过子树合并保留在本仓库中。
+# 它们目录内各自的 .gitignore 继续生效（target/、node_modules/、dist/ 等仍不入库）。
 
-# ---- 本地生成�? / 缓存 ----
+# ---- 本地生成�? / 缓存 ----
 /tmp/
 /.trae/
 /.workbuddy/
@@ -11,7 +11,7 @@
 build/
 dist/
 
-# ---- 操作系统 / 编辑�? ----
+# ---- 操作系统 / 编辑�? ----
 .DS_Store
 Thumbs.db
 .idea/
@@ -27,5 +27,5 @@ Thumbs.db
 /certs/san.cnf
 .env
 credentials*
-# db ����ʱ����
+# db ����ʱ����
 /db/_runtime/

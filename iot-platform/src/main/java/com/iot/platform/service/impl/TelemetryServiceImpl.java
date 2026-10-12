@@ -1,0 +1,209 @@
+package com.iot.platform.service.impl;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.iot.platform.common.PermanentTelemetryException;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import com.iot.platform.dto.TelemetryRequest;
+import com.iot.platform.entity.Device;
+import com.iot.platform.entity.DeviceLog;
+import com.iot.platform.entity.DeviceTelemetry;
+import com.iot.platform.mapper.DeviceLogMapper;
+import com.iot.platform.mapper.DeviceMapper;
+import com.iot.platform.mapper.DeviceTelemetryMapper;
+import com.iot.platform.service.AuthService;
+import com.iot.platform.service.ShadowService;
+import com.iot.platform.service.ShadowSyncService;
+import com.iot.platform.service.TelemetryService;
+import com.iot.platform.ws.TelemetryWebSocketHandler;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.stereotype.Service;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class TelemetryServiceImpl implements TelemetryService {
+
+    private final DeviceMapper deviceMapper;
+    private final DeviceTelemetryMapper telemetryMapper;
+    private final DeviceLogMapper deviceLogMapper;
+    private final StringRedisTemplate redisTemplate;
+    private final MeterRegistry meterRegistry;
+    private final Timer telemetryProcessTimer;
+    /** E1 设备影子：上报值(reported) 落库 */
+    private final ShadowService shadowService;
+    /** E1 设备影子：上线时补发离线指令 + 对齐期望值 */
+    private final ShadowSyncService shadowSyncService;
+    /** F2 停用拦截（复用认证缓存，命中时零查库） */
+    private final AuthService authService;
+    /**
+     * E2 实时推送：设备上线（0→1）时向 WS 订阅者广播 {@code type:"status"}。
+     *
+     * <p>契约 §9 早就写了这个报文，但 `broadcastStatus` 一直没有调用方 —— 后端只在
+     * 「收到上报」这一侧改变了状态，却没人告诉客户端，于是设备列表只能靠重新拉接口
+     * 才能看到上下线。补上这条广播，契约才和实现对得上。
+     */
+    private final TelemetryWebSocketHandler wsHandler;
+
+    /** 设备在线状态聚合刷新窗口：窗口内每设备只写一次 device 表，缓和高并发 hot-row 锁竞争（BUG-17 §3.3） */
+    private static final Duration ONLINE_FLUSH_WINDOW = Duration.ofSeconds(5);
+
+    @Override
+    @Async("telemetryExecutor") // 历史链路（EMQX→@Async 直推）兼容包装；D1 后由 Kafka 消费者调 processSync
+    public void process(TelemetryRequest request) {
+        try {
+            processSync(request);
+        } catch (Exception e) {
+            // 异步链路没有重试框架兜底，异常到线程池只会变成噪音日志；失败计数已在 processSync 内累加
+            log.error("async telemetry process failed: device_key={}", request.getDeviceKey(), e);
+        }
+    }
+
+    /**
+     * D2-2：失败一律抛异常，交由 {@code @RetryableTopic} 分级（永久 → DLT / 瞬时 → 退避重试）。
+     * 不再返回 boolean —— 那会让调用方"跳过 ack"，被后一条成功消息的 ack 越过而静默丢数据（BUG-21）。
+     */
+    @Override
+    public void processSync(TelemetryRequest request) {
+        // 埋点：上报→入库 全链路耗时（B5）
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            log.info("telemetry received: device_key={}, props={}", request.getDeviceKey(), request.getProperties());
+            // 1. device_key → device_id 映射（Redis 缓存）
+            Long deviceId = resolveDeviceId(request.getDeviceKey());
+            if (deviceId == null) {
+                // 永久失败：设备从未注册，重试多少次都是同一结果 → 不值一次重试，直接进死信
+                throwFatal("unknown device_key: " + request.getDeviceKey());
+            }
+
+            // 1.5 F2 停用拦截：设备或所属产品被停用 → 拒收。
+            // 认证回调只能拦住**新连接**，停用前已建立的长连接得靠这里兜住；
+            // 属永久失败（不恢复启用就永远不会成功），直接进死信而不是反复重试。
+            if (!authService.isDeviceEnabled(request.getDeviceKey())) {
+                throwFatal("device disabled: " + request.getDeviceKey());
+            }
+
+            // 2. 脏报文（缺属性/空属性）同样不会自愈，属永久失败
+            if (request.getProperties() == null || request.getProperties().isEmpty()) {
+                throwFatal("empty properties: device_key=" + request.getDeviceKey());
+            }
+
+            // 3. 批量入库：同一上报报文的多个属性拼成一条 multi-values INSERT（BUG-17 §3.2）
+            LocalDateTime ts = request.getTs() != null
+                    ? LocalDateTime.ofInstant(Instant.ofEpochMilli(request.getTs()), ZoneId.of("Asia/Shanghai"))
+                    : LocalDateTime.now();
+
+            List<DeviceTelemetry> telemList = new ArrayList<>(request.getProperties().size());
+            for (Map.Entry<String, Object> entry : request.getProperties().entrySet()) {
+                DeviceTelemetry t = new DeviceTelemetry();
+                t.setDeviceId(deviceId);
+                t.setPropertyKey(entry.getKey());
+                t.setValue(String.valueOf(entry.getValue()));
+                t.setValueType(inferValueType(entry.getValue()));
+                t.setTs(ts);
+                telemList.add(t);
+            }
+            if (!telemList.isEmpty()) {
+                telemetryMapper.insertBatch(telemList);
+            }
+
+            // 4. E1 影子：旁路更新上报值（reported）。
+            //    纪律同 D2-2 —— 失败只计数、**绝不上抛**：影子是增强能力，
+            //    不能因它把遥测打进 @RetryableTopic 重试阶梯甚至 DLT。
+            try {
+                shadowService.updateReported(request.getDeviceKey(), request.getProperties());
+            } catch (Exception e) {
+                meterRegistry.counter("iot_telemetry_shadow_failures_total").increment();
+                log.warn("shadow reported update failed (ignored): device_key={}, err={}",
+                        request.getDeviceKey(), e.getMessage());
+            }
+
+            // 5. 时间窗聚合刷新在线状态：5s 窗口内每设备只写一次 device 表（BUG-17 §3.3），
+            //    跨 worker 用 Redis SETNX 原子协调，消除高并发 hot-row 锁竞争。
+            Boolean first = redisTemplate.opsForValue()
+                    .setIfAbsent("onl:" + deviceId, "1", ONLINE_FLUSH_WINDOW);
+            if (Boolean.TRUE.equals(first)) {
+                refreshOnline(deviceId, request.getDeviceKey());
+            }
+            log.info("telemetry saved: device_key={}, props={}", request.getDeviceKey(), request.getProperties().size());
+        } catch (PermanentTelemetryException e) {
+            throw e; // 交给 @RetryableTopic 的 exclude → 跳过重试直达 DLT不重试
+        } catch (Exception e) {
+            // 瞬时失败（DB 连接断开 / 超时 / 死锁等）：标记为可重试，退避后重来
+            meterRegistry.counter("iot_telemetry_process_failures_total", "result", "retryable").increment();
+            log.error("telemetry process failed (retryable): device_key={}", request.getDeviceKey(), e);
+            throw new IllegalStateException("telemetry process failed: device_key=" + request.getDeviceKey(), e);
+        } finally {
+            sample.stop(telemetryProcessTimer);
+        }
+    }
+
+    /** 记一次永久失败并抛出（不入重试阶梯）。计数供 Prometheus 观测（B6 告警已按 result 全量聚合，加标签不影响）。 */
+    private void throwFatal(String message) {
+        meterRegistry.counter("iot_telemetry_process_failures_total", "result", "permanent").increment();
+        log.warn("telemetry permanent failure: {}", message);
+        throw new PermanentTelemetryException(message);
+    }
+
+    /** 在线状态写入：条件更新 0→1 视为上线转换并写上线日志；已在线仅刷新 last_online_at */
+    private void refreshOnline(Long deviceId, String deviceKey) {
+        LocalDateTime now = LocalDateTime.now();
+        int transitioned = deviceMapper.update(null, new LambdaUpdateWrapper<Device>()
+                .set(Device::getOnlineStatus, 1)
+                .set(Device::getLastOnlineAt, now)
+                .eq(Device::getId, deviceId)
+                .eq(Device::getOnlineStatus, 0));
+        if (transitioned > 0) {
+            DeviceLog logEntry = new DeviceLog();
+            logEntry.setDeviceId(deviceId);
+            logEntry.setLogType(1);
+            logEntry.setContent("设备上线（收到上报）");
+            logEntry.setCreatedAt(now);
+            deviceLogMapper.insert(logEntry);
+
+            // E2：只在**真正的转换**上广播（0→1）—— 否则每来一条上报都推一次，
+            // 订阅了全部设备的客户端会被刷屏。sessions 为空时方法内部直接 return，热点路径开销可忽略。
+            wsHandler.broadcastStatus(deviceKey, 1);
+
+            // E1：0→1 是天然的「设备上线」事件钩子 —— 触发影子同步
+            //（补发离线指令 + 对齐期望值）。内部已吞异常，不会影响本线程的遥测处理。
+            shadowSyncService.onDeviceOnline(deviceId, deviceKey);
+        } else {
+            deviceMapper.update(null, new LambdaUpdateWrapper<Device>()
+                    .set(Device::getLastOnlineAt, now)
+                    .eq(Device::getId, deviceId));
+        }
+    }
+
+    private Long resolveDeviceId(String deviceKey) {
+        String cached = redisTemplate.opsForValue().get("did:" + deviceKey);
+        if (cached != null) {
+            return Long.valueOf(cached);
+        }
+        Device device = deviceMapper.selectOne(
+                new LambdaQueryWrapper<Device>().eq(Device::getDeviceKey, deviceKey));
+        if (device != null) {
+            redisTemplate.opsForValue().set("did:" + deviceKey, String.valueOf(device.getId()));
+            return device.getId();
+        }
+        return null;
+    }
+
+    private int inferValueType(Object value) {
+        if (value instanceof Number) return 1;
+        if (value instanceof Boolean) return 3;
+        return 2;
+    }
+}

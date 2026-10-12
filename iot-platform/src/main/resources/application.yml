@@ -1,0 +1,117 @@
+server:
+  port: 8080
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+
+spring:
+  application:
+    name: iot-platform
+
+  # 数据源：MySQL 8.0（docker compose 的 mysql 服务，专用账号 iot）
+  # 宿主机 MySQL57 已停用；容器首发由 db/schema.sql + db/init-user.sql 自动建库建账号
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/iot_platform?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8&allowPublicKeyRetrieval=true
+    username: iot
+    password: 123456
+    hikari:
+      # 修复 Hikari connection broken WARN：自动验证连接有效性，maxLifetime 短于 MySQL 自动断开时间
+      max-lifetime: 180000  # 3 分钟
+      connection-timeout: 30000
+
+  # Redis：设备在线状态 / 鉴权凭据缓存
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 0
+
+  # Kafka：D1 数据链路演进（宿主机 Java 客户端连 EXTERNAL listener localhost:9092）
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      acks: all                # 等待 broker 持久化确认（D1：确认下沉到 Kafka）
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    consumer:
+      group-id: iot-telemetry-consumers
+      auto-offset-reset: earliest   # 无 offset 时从最早开始消费（可靠性优先）
+      enable-auto-commit: false     # 关闭 Kafka 自动提交；offset 由容器托管提交（D2-2 起 AckMode.RECORD）
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      properties:
+        # D2-2 背压：必须保证 max.poll.records × 单条处理耗时 << max.poll.interval.ms，
+        # 否则处理慢会被踢出消费组 → rebalance 风暴（这才是"消费不过来"最真实的崩法）。
+        # 50 条 × 单条约 4ms ≈ 200ms，远低于 300s 上限，留足余量。
+        max.poll.records: 50
+        max.poll.interval.ms: 300000
+    listener:
+      ack-mode: record         # 与 KafkaConfig 的 RECORD 保持一致（供重试/DLT 容器工厂复用）
+    retry:
+      topic:
+        # D2-2：@RetryableTopic 自动装配开关。Boot 3.2 默认即 true，显式声明防止默认值变更导致
+        # 注解被静默忽略（那会让失败消息退回"只记日志不重试"的旧行为）。
+        enabled: true
+
+# MyBatis-Plus 配置
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    # 压测定位：V2-C 移除控制台 SQL 日志（曾是写路径吞吐首要瓶颈，BUG-17 §3.1）
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+  global-config:
+    db-config:
+      # 逻辑删除：与 schema.sql 的 deleted 字段对齐（0 未删 / 1 已删）
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+# EMQX REST API（控制下发走宿主机映射端口 18083；用 bootstrap API Key 认证）
+emqx:
+  api-url: http://localhost:18083/api/v5
+  username: iotkey
+  password: iotsecret123
+
+# JWT（控制台登录签发 Token）
+jwt:
+  secret: iot-platform-mvp-jwt-secret-key-please-change-0123456789
+  expire: 7200
+  # 评审 2.6：勾选「记住我」时签发的有效期（秒），默认 7 天
+  remember-expire: 604800
+
+# F3 设备密钥加密存储：device_secret 以 AES-256-GCM 密文入库，明文仅注册响应一次性返回。
+# 生产必须用环境变量 IOT_DEVICE_SECRET_KEY 覆盖（默认值仅本地开发）；换 key 前需先解密再重加密。
+app:
+  device-secret:
+    master-key: ${IOT_DEVICE_SECRET_KEY:4PukVyzWvfg6EnS0w5AtQv7ZZoGNKXKR7D7Gse6W8PE=}
+
+logging:
+  level:
+    com.iot.platform: debug
+
+# Actuator 配置：暴露健康检查和 Prometheus 端点
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus,info
+  endpoint:
+    health:
+      show-details: always  # 总是显示详细健康信息（含各组件状态）
+  health:
+    db:
+      enabled: true
+    redis:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    # B3 大盘「接口耗时 P95 by URI」需要 `http_server_requests_seconds_bucket`，
+    # 而 Micrometer 默认**不导出** HTTP 请求的直方图桶（只给 _count/_sum/_max）——
+    # 于是那块面板一直是 No data（且很容易被当成"最近没流量"）。实测确认过：
+    # 未开时 /actuator/prometheus 里没有任何 http_server_requests_seconds_bucket。
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true

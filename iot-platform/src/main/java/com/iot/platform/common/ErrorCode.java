@@ -1,0 +1,26 @@
+package com.iot.platform.common;
+
+/**
+ * 错误码常量，对应 API契约.md §0.2
+ */
+public final class ErrorCode {
+
+    //禁止外部 new ErrorCode()，防止实例化。
+    private ErrorCode() {
+    }
+
+    /** 成功 */
+    public static final int SUCCESS = 0;
+    /** 参数错误 */
+    public static final int PARAM_ERROR = 4001;
+    /** 设备不存在 */
+    public static final int DEVICE_NOT_FOUND = 4004;
+    /** 设备不在线（E1 语义分家：命令下发遇离线直接失败） */
+    public static final int DEVICE_OFFLINE = 4005;
+    /** 设备或所属产品已停用（F2 启停）—— 接入、上报、指令全部拒绝 */
+    public static final int DEVICE_DISABLED = 4006;
+    /** 鉴权失败 */
+    public static final int AUTH_FAILED = 4010;
+    /** 服务内部错误 */
+    public static final int INTERNAL_ERROR = 5000;
+}
